@@ -62,11 +62,10 @@ function buildBorderPalette(data, width, height) {
 
   const samples = [];
   const step = Math.max(4, Math.floor(Math.min(width, height) / 48));
+
   const pushSample = (x, y) => {
     const pixel = safePixelAt(data, width, height, x, y);
-    if (pixel) {
-      samples.push(pixel);
-    }
+    if (pixel) samples.push(pixel);
   };
 
   for (let x = 0; x < width; x += step) {
@@ -132,7 +131,6 @@ async function decodeImageFromFile(file) {
 
     const img = new Image();
     img.decoding = "async";
-    img.crossOrigin = "anonymous";
 
     await new Promise((resolve, reject) => {
       let settled = false;
@@ -198,14 +196,11 @@ function getSafeImageData(ctx, width, height) {
 
 function runInternalTests() {
   const tests = [];
-
-  const add = (name, pass, details = "") => {
-    tests.push({ name, pass, details });
-  };
+  const add = (name, pass, details = "") => tests.push({ name, pass, details });
 
   try {
     const palette = buildBorderPalette(null, 10, 10);
-    add("无 data 时返回默认调色板", Array.isArray(palette) && palette.length > 0 && palette[0][0] === 255);
+    add("无 data 时返回默认调色板", Array.isArray(palette) && palette[0][0] === 255);
   } catch (err) {
     add("无 data 时返回默认调色板", false, String(err));
   }
@@ -250,7 +245,7 @@ function runInternalTests() {
 
   try {
     const palette = buildBorderPalette(new Uint8ClampedArray([255, 255, 255, 255]), 2, 2);
-    add("边界数据长度不足时回退默认调色板", Array.isArray(palette) && palette.length > 0 && palette[0][0] === 255);
+    add("边界数据长度不足时回退默认调色板", Array.isArray(palette) && palette[0][0] === 255);
   } catch (err) {
     add("边界数据长度不足时回退默认调色板", false, String(err));
   }
@@ -551,7 +546,7 @@ export default function FrontendCutoutToolDemo() {
     setStatus(mode === "erase" ? "已擦除一部分背景。" : "已恢复一部分主体。");
   };
 
-  const exportPng = async () => {
+  const exportPng = () => {
     const canvas = resultCanvasRef.current;
     if (!canvas || !hasImage) return;
     canvas.toBlob((blob) => {
@@ -576,39 +571,40 @@ export default function FrontendCutoutToolDemo() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-8">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <div style={styles.page}>
+      <style>{globalCss}</style>
+      <div style={styles.shell}>
+        <div style={styles.headerRow}>
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight">纯前端抠图工具 Demo</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-300">
+            <h1 style={styles.title}>纯前端抠图工具 Demo</h1>
+            <p style={styles.subtitle}>
               全部在浏览器本地处理，不上传服务器。当前这版先用“边缘背景识别 + 手动修边”的方式，适合白底、纯色底、拍摄背景较干净的图片。
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm text-slate-300 shadow-xl">
+          <div style={styles.metaCard}>
             {imgMeta ? `${imgMeta.name} · ${imgMeta.width} × ${imgMeta.height}` : "还没有载入图片"}
           </div>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[340px_1fr]">
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-5 shadow-2xl">
-            <div className="space-y-5">
+        <div className="cuttool-layout">
+          <div style={styles.sidebarCard}>
+            <div style={styles.stackLarge}>
               <div>
-                <label className="mb-2 block text-sm font-medium text-slate-200">选择图片</label>
+                <label style={styles.label}>选择图片</label>
                 <input
                   type="file"
                   accept="image/*"
-                  className="block w-full cursor-pointer rounded-2xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm file:mr-3 file:rounded-xl file:border-0 file:bg-slate-200 file:px-3 file:py-2 file:text-slate-900"
                   onChange={(e) => loadImage(e.target.files?.[0])}
                   disabled={busy}
+                  style={styles.fileInput}
                 />
-                <p className="mt-2 text-xs text-slate-400">现在会优先走 createImageBitmap，失败后自动回退到 Image 对象解码。</p>
+                <div style={styles.mutedTip}>现在会优先走 createImageBitmap，失败后自动回退到 Image 对象解码。</div>
               </div>
 
               <div>
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="font-medium text-slate-200">自动去底阈值</span>
-                  <span className="text-slate-400">{threshold}</span>
+                <div style={styles.rowBetween}>
+                  <span style={styles.labelInline}>自动去底阈值</span>
+                  <span style={styles.value}>{threshold}</span>
                 </div>
                 <input
                   type="range"
@@ -616,16 +612,16 @@ export default function FrontendCutoutToolDemo() {
                   max="100"
                   value={threshold}
                   onChange={(e) => setThreshold(Number(e.target.value))}
-                  className="w-full"
                   disabled={!hasImage || busy}
+                  style={styles.range}
                 />
-                <p className="mt-2 text-xs text-slate-400">背景和主体颜色接近时，适当调小；背景较纯净时，适当调大。</p>
+                <div style={styles.mutedTip}>背景和主体颜色接近时，适当调小；背景较纯净时，适当调大。</div>
               </div>
 
               <div>
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="font-medium text-slate-200">画笔大小</span>
-                  <span className="text-slate-400">{brushSize}px</span>
+                <div style={styles.rowBetween}>
+                  <span style={styles.labelInline}>画笔大小</span>
+                  <span style={styles.value}>{brushSize}px</span>
                 </div>
                 <input
                   type="range"
@@ -633,92 +629,71 @@ export default function FrontendCutoutToolDemo() {
                   max="80"
                   value={brushSize}
                   onChange={(e) => setBrushSize(Number(e.target.value))}
-                  className="w-full"
                   disabled={!hasImage || busy}
+                  style={styles.range}
                 />
               </div>
 
               <div>
-                <div className="mb-2 block text-sm font-medium text-slate-200">修边模式</div>
-                <div className="grid grid-cols-3 gap-2">
+                <div style={styles.label}>修边模式</div>
+                <div style={styles.modeGrid}>
                   {[
                     ["erase", "擦除"],
                     ["restore", "恢复"],
                     ["view", "查看"],
-                  ].map(([value, label]) => (
-                    <button
-                      key={value}
-                      onClick={() => setMode(value)}
-                      className={`rounded-2xl px-3 py-2 text-sm transition ${
-                        mode === value
-                          ? "bg-slate-100 text-slate-900"
-                          : "border border-slate-700 bg-slate-950 text-slate-200 hover:bg-slate-800"
-                      }`}
-                      disabled={!hasImage || busy}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                  ].map(([value, label]) => {
+                    const active = mode === value;
+                    return (
+                      <button
+                        key={value}
+                        onClick={() => setMode(value)}
+                        disabled={!hasImage || busy}
+                        style={{ ...styles.modeButton, ...(active ? styles.modeButtonActive : styles.modeButtonIdle) }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={autoCutout}
-                  disabled={!hasImage || busy}
-                  className="rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-medium text-slate-950 transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
-                >
+              <div style={styles.buttonGrid}>
+                <button onClick={autoCutout} disabled={!hasImage || busy} style={{ ...styles.primaryButton, ...(busy || !hasImage ? styles.buttonDisabled : null) }}>
                   {busy ? "处理中..." : "自动去底"}
                 </button>
-                <button
-                  onClick={resetMask}
-                  disabled={!hasImage || busy}
-                  className="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-medium text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
+                <button onClick={resetMask} disabled={!hasImage || busy} style={{ ...styles.secondaryButton, ...(busy || !hasImage ? styles.buttonDisabled : null) }}>
                   重置
                 </button>
-                <button
-                  onClick={undo}
-                  disabled={!hasImage || busy}
-                  className="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-medium text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
+                <button onClick={undo} disabled={!hasImage || busy} style={{ ...styles.secondaryButton, ...(busy || !hasImage ? styles.buttonDisabled : null) }}>
                   撤销
                 </button>
-                <button
-                  onClick={exportPng}
-                  disabled={!hasImage || busy}
-                  className="rounded-2xl bg-sky-400 px-4 py-3 text-sm font-medium text-slate-950 transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
-                >
+                <button onClick={exportPng} disabled={!hasImage || busy} style={{ ...styles.infoButton, ...(busy || !hasImage ? styles.buttonDisabled : null) }}>
                   导出 PNG
                 </button>
               </div>
 
-              <button
-                onClick={() => setShowOriginal((v) => !v)}
-                disabled={!hasImage}
-                className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-medium text-slate-100 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
+              <button onClick={() => setShowOriginal((v) => !v)} disabled={!hasImage} style={{ ...styles.secondaryButton, width: "100%", ...(hasImage ? null : styles.buttonDisabled) }}>
                 {showOriginal ? "隐藏原图面板" : "显示原图面板"}
               </button>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-300">
-                <div className="mb-1 font-medium text-slate-100">状态</div>
-                <div>{status}</div>
+              <div style={styles.infoCard}>
+                <div style={styles.infoTitle}>状态</div>
+                <div style={styles.infoBody}>{status}</div>
               </div>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-300">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="font-medium text-slate-100">内置自检</span>
-                  <span className="text-xs text-slate-400">{passedCount}/{testResults.length} 通过</span>
+              <div style={styles.infoCard}>
+                <div style={styles.rowBetween}>
+                  <span style={styles.infoTitle}>内置自检</span>
+                  <span style={styles.smallMuted}>{passedCount}/{testResults.length} 通过</span>
                 </div>
-                <div className="space-y-2">
+                <div style={styles.stackSmall}>
                   {testResults.map((test) => (
-                    <div key={test.name} className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs">
-                      <div className="flex items-center justify-between gap-3">
+                    <div key={test.name} style={styles.testItem}>
+                      <div style={styles.rowBetween}>
                         <span>{test.name}</span>
-                        <span className={test.pass ? "text-emerald-300" : "text-rose-300"}>{test.pass ? "PASS" : "FAIL"}</span>
+                        <span style={test.pass ? styles.passText : styles.failText}>{test.pass ? "PASS" : "FAIL"}</span>
                       </div>
-                      {test.details ? <div className="mt-1 text-slate-400">{test.details}</div> : null}
+                      {test.details ? <div style={styles.testDetails}>{test.details}</div> : null}
                     </div>
                   ))}
                 </div>
@@ -726,37 +701,34 @@ export default function FrontendCutoutToolDemo() {
             </div>
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+          <div className="cuttool-canvases">
             {showOriginal ? (
-              <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 shadow-2xl">
-                <div className="mb-3 text-sm font-medium text-slate-200">原图</div>
-                <div className="overflow-auto rounded-2xl border border-slate-800 bg-slate-950 p-3">
-                  <canvas ref={sourceCanvasRef} className="mx-auto block max-h-[70vh] max-w-full rounded-xl" />
+              <div style={styles.canvasCard}>
+                <div style={styles.canvasTitle}>原图</div>
+                <div style={styles.canvasScrollerDark}>
+                  <canvas ref={sourceCanvasRef} style={styles.canvasElement} />
                 </div>
               </div>
             ) : (
-              <canvas ref={sourceCanvasRef} className="hidden" />
+              <canvas ref={sourceCanvasRef} style={{ display: "none" }} />
             )}
 
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 shadow-2xl">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-sm font-medium text-slate-200">结果（透明底预览）</div>
-                <div className="text-xs text-slate-400">
+            <div style={styles.canvasCard}>
+              <div style={styles.rowBetween}>
+                <div style={styles.canvasTitle}>结果（透明底预览）</div>
+                <div style={styles.smallMuted}>
                   {mode === "erase" ? "拖动画笔擦掉多余背景" : mode === "restore" ? "拖动画笔恢复主体" : "查看模式"}
                 </div>
               </div>
-              <div className="overflow-auto rounded-2xl border border-slate-800 p-3" style={board}>
+              <div style={{ ...styles.canvasScroller, ...board }}>
                 <canvas
                   ref={resultCanvasRef}
-                  className="mx-auto block max-h-[70vh] max-w-full rounded-xl shadow-2xl"
-                  style={{ touchAction: "none", cursor: mode === "view" ? "default" : "crosshair" }}
+                  style={{ ...styles.canvasElement, cursor: mode === "view" ? "default" : "crosshair", touchAction: "none" }}
                   onPointerDown={onPointerDown}
                   onPointerMove={onPointerMove}
                 />
               </div>
-              <div className="mt-3 text-xs leading-6 text-slate-400">
-                小提示：白底商品图、证件照、LOGO 图会比较稳；头发丝、半透明婚纱、复杂环境光背景，这版还需要更多模型能力。
-              </div>
+              <div style={styles.mutedTip}>小提示：白底商品图、证件照、LOGO 图会比较稳；头发丝、半透明婚纱、复杂环境光背景，这版还需要更多模型能力。</div>
             </div>
           </div>
         </div>
@@ -764,4 +736,287 @@ export default function FrontendCutoutToolDemo() {
     </div>
   );
 }
+
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background: "#020617",
+    color: "#e2e8f0",
+    padding: "24px",
+    boxSizing: "border-box",
+    fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  },
+  shell: {
+    maxWidth: "1440px",
+    margin: "0 auto",
+  },
+  headerRow: {
+    display: "flex",
+    gap: "16px",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    marginBottom: "24px",
+  },
+  title: {
+    margin: 0,
+    fontSize: "32px",
+    lineHeight: 1.15,
+    fontWeight: 700,
+    color: "#f8fafc",
+  },
+  subtitle: {
+    margin: "12px 0 0",
+    maxWidth: "860px",
+    fontSize: "14px",
+    lineHeight: 1.7,
+    color: "#cbd5e1",
+  },
+  metaCard: {
+    padding: "14px 16px",
+    borderRadius: "18px",
+    border: "1px solid #1e293b",
+    background: "rgba(15,23,42,0.78)",
+    color: "#cbd5e1",
+    fontSize: "14px",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+  },
+  sidebarCard: {
+    borderRadius: "24px",
+    border: "1px solid #1e293b",
+    background: "rgba(15,23,42,0.88)",
+    padding: "20px",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.32)",
+  },
+  stackLarge: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+  },
+  stackSmall: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    marginTop: "10px",
+  },
+  label: {
+    display: "block",
+    fontSize: "14px",
+    fontWeight: 600,
+    color: "#e2e8f0",
+    marginBottom: "8px",
+  },
+  labelInline: {
+    fontSize: "14px",
+    fontWeight: 600,
+    color: "#e2e8f0",
+  },
+  value: {
+    fontSize: "14px",
+    color: "#94a3b8",
+  },
+  fileInput: {
+    display: "block",
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "12px",
+    borderRadius: "16px",
+    border: "1px solid #334155",
+    background: "#020617",
+    color: "#e2e8f0",
+    fontSize: "14px",
+  },
+  range: {
+    width: "100%",
+    marginTop: "6px",
+  },
+  mutedTip: {
+    marginTop: "8px",
+    fontSize: "12px",
+    lineHeight: 1.6,
+    color: "#94a3b8",
+  },
+  smallMuted: {
+    fontSize: "12px",
+    color: "#94a3b8",
+  },
+  rowBetween: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+  },
+  modeGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: "8px",
+  },
+  modeButton: {
+    padding: "10px 12px",
+    borderRadius: "14px",
+    fontSize: "14px",
+    fontWeight: 600,
+    cursor: "pointer",
+    transition: "all 0.2s ease",
+  },
+  modeButtonActive: {
+    background: "#f8fafc",
+    color: "#0f172a",
+    border: "1px solid #f8fafc",
+  },
+  modeButtonIdle: {
+    background: "#020617",
+    color: "#e2e8f0",
+    border: "1px solid #334155",
+  },
+  buttonGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "8px",
+  },
+  primaryButton: {
+    padding: "12px 14px",
+    borderRadius: "16px",
+    border: "1px solid transparent",
+    background: "#34d399",
+    color: "#082f49",
+    fontSize: "14px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  infoButton: {
+    padding: "12px 14px",
+    borderRadius: "16px",
+    border: "1px solid transparent",
+    background: "#38bdf8",
+    color: "#082f49",
+    fontSize: "14px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  secondaryButton: {
+    padding: "12px 14px",
+    borderRadius: "16px",
+    border: "1px solid #334155",
+    background: "#020617",
+    color: "#e2e8f0",
+    fontSize: "14px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+    cursor: "not-allowed",
+  },
+  infoCard: {
+    padding: "14px",
+    borderRadius: "16px",
+    border: "1px solid #1e293b",
+    background: "#020617",
+  },
+  infoTitle: {
+    fontSize: "14px",
+    fontWeight: 700,
+    color: "#f8fafc",
+    marginBottom: "6px",
+  },
+  infoBody: {
+    fontSize: "14px",
+    lineHeight: 1.6,
+    color: "#cbd5e1",
+  },
+  testItem: {
+    padding: "10px 12px",
+    borderRadius: "12px",
+    border: "1px solid #1e293b",
+    background: "rgba(15,23,42,0.72)",
+    fontSize: "12px",
+    lineHeight: 1.5,
+  },
+  testDetails: {
+    marginTop: "6px",
+    color: "#94a3b8",
+  },
+  passText: {
+    color: "#86efac",
+    fontWeight: 700,
+  },
+  failText: {
+    color: "#fda4af",
+    fontWeight: 700,
+  },
+  canvasCard: {
+    borderRadius: "24px",
+    border: "1px solid #1e293b",
+    background: "rgba(15,23,42,0.88)",
+    padding: "16px",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.32)",
+  },
+  canvasTitle: {
+    marginBottom: "12px",
+    fontSize: "14px",
+    fontWeight: 700,
+    color: "#e2e8f0",
+  },
+  canvasScrollerDark: {
+    overflow: "auto",
+    borderRadius: "18px",
+    border: "1px solid #1e293b",
+    background: "#020617",
+    padding: "12px",
+  },
+  canvasScroller: {
+    overflow: "auto",
+    borderRadius: "18px",
+    border: "1px solid #1e293b",
+    padding: "12px",
+  },
+  canvasElement: {
+    display: "block",
+    margin: "0 auto",
+    maxWidth: "100%",
+    maxHeight: "70vh",
+    borderRadius: "12px",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
+  },
+};
+
+const globalCss = `
+  * { box-sizing: border-box; }
+  html, body, #root { margin: 0; min-height: 100%; }
+  body { background: #020617; }
+  button, input { font: inherit; }
+
+  .cuttool-layout {
+    display: grid;
+    grid-template-columns: 340px minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+  }
+
+  .cuttool-canvases {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 24px;
+    align-items: start;
+  }
+
+  @media (max-width: 1180px) {
+    .cuttool-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 980px) {
+    .cuttool-canvases {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    input[type="file"] {
+      font-size: 13px;
+    }
+  }
+`;
 
