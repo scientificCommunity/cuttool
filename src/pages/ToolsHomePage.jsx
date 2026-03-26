@@ -1,4 +1,4 @@
-function buildSections(cutoutHref, backgroundReplaceHref, imageSplitHref) {
+function buildSections(cutoutHref, backgroundReplaceHref, imageSplitHref, videoFrameHref) {
   return [
     {
       key: "ready",
@@ -39,6 +39,18 @@ function buildSections(cutoutHref, backgroundReplaceHref, imageSplitHref) {
           href: imageSplitHref,
           summary: "把一张图按指定行数和列数切成多张小图，适合九宫格、切片素材、规则拼图和批量拆分场景。",
           features: ["行列切分", "网格预览", "单张下载", "批量导出"],
+          metricLabel: "输出格式",
+          metricValue: "PNG",
+        },
+        {
+          key: "video-frame",
+          name: "视频帧提取",
+          category: "视频处理",
+          status: "Ready",
+          state: "active",
+          href: videoFrameHref,
+          summary: "把本地视频按总张数或时间间隔抽成静态帧，适合做封面挑选、分镜参考和素材拆解。",
+          features: ["按张数抽帧", "按间隔抽帧", "时间范围", "导出 PNG"],
           metricLabel: "输出格式",
           metricValue: "PNG",
         },
@@ -175,6 +187,25 @@ const styles = {
   miniNote: {
     fontSize: "13px",
     color: "#94a3b8",
+  },
+  topActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+  statsLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "10px 14px",
+    borderRadius: "999px",
+    border: "1px solid rgba(56,189,248,0.22)",
+    background: "rgba(2,6,23,0.52)",
+    color: "#e2e8f0",
+    textDecoration: "none",
+    fontSize: "13px",
+    fontWeight: 700,
   },
   hero: {
     display: "grid",
@@ -445,8 +476,15 @@ const homeCss = `
   }
 `;
 
-export default function ToolsHomePage({ cutoutHref, backgroundReplaceHref, imageSplitHref }) {
-  const sections = buildSections(cutoutHref, backgroundReplaceHref, imageSplitHref);
+export default function ToolsHomePage({
+  cutoutHref,
+  backgroundReplaceHref,
+  imageSplitHref,
+  videoFrameHref,
+  statsHref,
+  onToolClick,
+}) {
+  const sections = buildSections(cutoutHref, backgroundReplaceHref, imageSplitHref, videoFrameHref);
   const totalCount = sections.flatMap((section) => section.tools).length;
   const readyCount = countToolsByState(sections, "active");
   const plannedCount = countToolsByState(sections, "planned");
@@ -460,7 +498,12 @@ export default function ToolsHomePage({ cutoutHref, backgroundReplaceHref, image
             <span style={styles.dot} />
             Tool Shelf
           </div>
-          <div style={styles.miniNote}>首页现在已经扩成多工具卡片布局，后续接工具只需要补路由和页面即可。</div>
+          <div style={styles.topActions}>
+            <div style={styles.miniNote}>首页现在已经扩成多工具卡片布局，后续接工具只需要补路由和页面即可。</div>
+            <a href={statsHref} style={styles.statsLink}>
+              访问统计
+            </a>
+          </div>
         </div>
 
         <section className="tools-hero" style={styles.hero}>
@@ -468,7 +511,7 @@ export default function ToolsHomePage({ cutoutHref, backgroundReplaceHref, image
             <div style={styles.heroEyebrow}>Browser First</div>
             <h1 style={styles.title}>工具集</h1>
             <p style={styles.subtitle}>
-              这里作为所有小工具的统一入口。当前“抠图”“背景替换”和“图片拆分”已经接入可用，其他卡片先按工具矩阵的方式排开，后续可以逐个落成真实页面。
+              这里作为所有小工具的统一入口。当前“抠图”“背景替换”“图片拆分”和“视频帧提取”已经接入可用，其他卡片先按工具矩阵的方式排开，后续可以逐个落成真实页面。
             </p>
             <div style={styles.heroFooter}>
               <div style={styles.heroChip}>
@@ -488,9 +531,9 @@ export default function ToolsHomePage({ cutoutHref, backgroundReplaceHref, image
 
           <aside style={styles.sideCard}>
             <p style={styles.sideTitle}>当前焦点</p>
-            <div style={styles.sideBig}>三工具</div>
+            <div style={styles.sideBig}>{readyCount} 工具</div>
             <p style={styles.sideText}>
-              现在已经有“抠图”“背景替换”和“图片拆分”三个真实工具。其余卡片继续作为后续扩展占位，方便按同一套结构逐个接入。
+              现在已经有“抠图”“背景替换”“图片拆分”和“视频帧提取”四个真实工具。其余卡片继续作为后续扩展占位，方便按同一套结构逐个接入。
             </p>
           </aside>
         </section>
@@ -518,6 +561,7 @@ export default function ToolsHomePage({ cutoutHref, backgroundReplaceHref, image
                         key={tool.key}
                         href={tool.href}
                         className="tool-card--active"
+                        onClick={() => onToolClick?.(tool.key, tool.name)}
                         style={{ ...styles.toolCard, ...cardStyle }}
                       >
                         <div style={styles.toolMeta}>
