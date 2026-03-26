@@ -1,4 +1,4 @@
-function buildSections(cutoutHref) {
+function buildSections(cutoutHref, backgroundReplaceHref, imageSplitHref) {
   return [
     {
       key: "ready",
@@ -18,6 +18,30 @@ function buildSections(cutoutHref) {
           metricLabel: "本地运行",
           metricValue: "100%",
         },
+        {
+          key: "background-replace",
+          name: "背景替换",
+          category: "图像处理",
+          status: "Ready",
+          state: "active",
+          href: backgroundReplaceHref,
+          summary: "在浏览器内完成主体分离，再把主体合成到纯色、渐变或上传背景图上，适合商品图和头像素材。",
+          features: ["纯色背景", "渐变模板", "背景上传", "导出合成图"],
+          metricLabel: "本地运行",
+          metricValue: "100%",
+        },
+        {
+          key: "image-split",
+          name: "图片拆分",
+          category: "图像处理",
+          status: "Ready",
+          state: "active",
+          href: imageSplitHref,
+          summary: "把一张图按指定行数和列数切成多张小图，适合九宫格、切片素材、规则拼图和批量拆分场景。",
+          features: ["行列切分", "网格预览", "单张下载", "批量导出"],
+          metricLabel: "输出格式",
+          metricValue: "PNG",
+        },
       ],
     },
     {
@@ -26,17 +50,6 @@ function buildSections(cutoutHref) {
       title: "规划中",
       description: "先把工具矩阵和卡片信息铺开，后续可以按这个结构逐个接入。",
       tools: [
-        {
-          key: "background-replace",
-          name: "背景替换",
-          category: "图像处理",
-          status: "Planned",
-          state: "planned",
-          summary: "在已有主体分离结果上快速换成纯色、渐变或上传背景，适合商品图和头像素材。",
-          features: ["纯色背景", "渐变模板", "背景上传", "一键导出"],
-          metricLabel: "阶段",
-          metricValue: "P1",
-        },
         {
           key: "resize-batch",
           name: "批量改尺寸",
@@ -432,8 +445,8 @@ const homeCss = `
   }
 `;
 
-export default function ToolsHomePage({ cutoutHref }) {
-  const sections = buildSections(cutoutHref);
+export default function ToolsHomePage({ cutoutHref, backgroundReplaceHref, imageSplitHref }) {
+  const sections = buildSections(cutoutHref, backgroundReplaceHref, imageSplitHref);
   const totalCount = sections.flatMap((section) => section.tools).length;
   const readyCount = countToolsByState(sections, "active");
   const plannedCount = countToolsByState(sections, "planned");
@@ -455,7 +468,7 @@ export default function ToolsHomePage({ cutoutHref }) {
             <div style={styles.heroEyebrow}>Browser First</div>
             <h1 style={styles.title}>工具集</h1>
             <p style={styles.subtitle}>
-              这里作为所有小工具的统一入口。当前“抠图”已经接入可用，其他卡片先按工具矩阵的方式排开，后续可以逐个落成真实页面。
+              这里作为所有小工具的统一入口。当前“抠图”“背景替换”和“图片拆分”已经接入可用，其他卡片先按工具矩阵的方式排开，后续可以逐个落成真实页面。
             </p>
             <div style={styles.heroFooter}>
               <div style={styles.heroChip}>
@@ -475,9 +488,9 @@ export default function ToolsHomePage({ cutoutHref }) {
 
           <aside style={styles.sideCard}>
             <p style={styles.sideTitle}>当前焦点</p>
-            <div style={styles.sideBig}>抠图</div>
+            <div style={styles.sideBig}>三工具</div>
             <p style={styles.sideText}>
-              当前唯一可直接进入的工具，保留了自动去底、手动修边和透明 PNG 导出能力。其余工具先以卡片形式占位，方便继续扩展。
+              现在已经有“抠图”“背景替换”和“图片拆分”三个真实工具。其余卡片继续作为后续扩展占位，方便按同一套结构逐个接入。
             </p>
           </aside>
         </section>
