@@ -4,6 +4,7 @@ import { SelfTestCard, StatusCard } from "../components/ImageToolPanels.jsx";
 import { sharedToolPageStyles } from "../components/imageToolWorkspaceStyles.js";
 import { decodeImageFromFile } from "../lib/cutoutCore.js";
 import {
+  MAX_SPLIT_COUNT,
   buildSplitPieces,
   createPieceDownloadName,
   normalizeSplitCount,
@@ -17,6 +18,8 @@ const SPLIT_PRESETS = [
   { label: "2 × 3", rows: 2, columns: 3 },
   { label: "3 × 4", rows: 3, columns: 4 },
 ];
+
+const MAX_TILE_PREVIEWS = 240;
 
 const styles = {
   ...sharedToolPageStyles,
@@ -320,6 +323,16 @@ export default function ImageSplitToolPage({ homeHref }) {
     return `${splitResult.rows} 行 × ${splitResult.columns} 列，共 ${splitResult.pieces.length} 张；单张宽度 ${widthText}，高度 ${heightText}${adjusted ? "；原图像素较小，已自动收敛到可切分上限。" : "。"}`;
   }, [columns, rows, splitResult]);
 
+  const visiblePieces = useMemo(() => {
+    if (!splitResult) {
+      return [];
+    }
+
+    return splitResult.pieces.slice(0, MAX_TILE_PREVIEWS);
+  }, [splitResult]);
+
+  const hiddenPreviewCount = splitResult ? splitResult.pieces.length - visiblePieces.length : 0;
+
   useEffect(() => {
     if (!imgMeta || !splitResult) {
       clearCanvas(sourceCanvasRef.current);
@@ -343,11 +356,11 @@ export default function ImageSplitToolPage({ homeHref }) {
     }
 
     const source = decodedRef.current.source;
-    for (const piece of splitResult.pieces) {
+    for (const piece of visiblePieces) {
       const canvas = tileCanvasRefs.current.get(piece.id);
       drawPiecePreview(canvas, source, piece);
     }
-  }, [splitResult]);
+  }, [splitResult, visiblePieces]);
 
   useEffect(() => {
     if (!imgMeta || !splitResult) {
@@ -481,7 +494,7 @@ export default function ImageSplitToolPage({ homeHref }) {
               disabled={controlsDisabled}
               style={styles.fileInput}
             />
-            <div style={styles.mutedTip}>切分按原始像素边界处理，导出时不会沿用预览缩放尺寸。</div>
+            <div style={styles.mutedTip}>切分按原始像素边界处理，导出时不会沿用预览缩放尺寸。行数和列数最高支持 {MAX_SPLIT_COUNT}。</div>
           </div>
 
           <div style={styles.controlGrid}>
@@ -493,7 +506,7 @@ export default function ImageSplitToolPage({ homeHref }) {
               <input
                 type="number"
                 min="1"
-                max="12"
+                max={MAX_SPLIT_COUNT}
                 value={rows}
                 onChange={handleRowChange}
                 disabled={controlsDisabled}
@@ -509,7 +522,7 @@ export default function ImageSplitToolPage({ homeHref }) {
               <input
                 type="number"
                 min="1"
-                max="12"
+                max={MAX_SPLIT_COUNT}
                 value={columns}
                 onChange={handleColumnChange}
                 disabled={controlsDisabled}
@@ -590,12 +603,18 @@ export default function ImageSplitToolPage({ homeHref }) {
       <div style={styles.canvasCard}>
         <div style={styles.rowBetween}>
           <div style={styles.canvasTitle}>拆分结果</div>
-          <div style={styles.smallMuted}>{splitResult ? `${splitResult.pieces.length} 张小图` : "尚未生成"}</div>
+          <div style={styles.smallMuted}>
+            {splitResult
+              ? hiddenPreviewCount > 0
+                ? `预览 ${visiblePieces.length} / ${splitResult.pieces.length} 张`
+                : `${splitResult.pieces.length} 张小图`
+              : "尚未生成"}
+          </div>
         </div>
         <div style={styles.previewScroller}>
           {hasImage ? (
             <div style={styles.tileGrid}>
-              {splitResult.pieces.map((piece) => (
+              {visiblePieces.map((piece) => (
                 <div key={piece.id} style={styles.tileCard}>
                   <div style={styles.tileHead}>
                     <div>
@@ -628,7 +647,11 @@ export default function ImageSplitToolPage({ homeHref }) {
             <div style={styles.placeholder}>设置行数和列数后，右侧会生成所有切片预览和下载入口。</div>
           )}
         </div>
-        <div style={styles.mutedTip}>批量导出会逐张触发浏览器下载；如果浏览器拦截，需要允许当前站点的多文件下载。</div>
+        <div style={styles.mutedTip}>
+          {hiddenPreviewCount > 0
+            ? `当前只渲染前 ${visiblePieces.length} 张预览，避免大规模切分时页面卡顿；批量导出仍会覆盖全部 ${splitResult?.pieces.length ?? 0} 张。`
+            : "批量导出会逐张触发浏览器下载；如果浏览器拦截，需要允许当前站点的多文件下载。"}
+        </div>
       </div>
     </ImageToolWorkspace>
   );

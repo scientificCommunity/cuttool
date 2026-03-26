@@ -1,4 +1,6 @@
-export function normalizeSplitCount(value, { min = 1, max = 12, fallback = 1 } = {}) {
+export const MAX_SPLIT_COUNT = 100;
+
+export function normalizeSplitCount(value, { min = 1, max = MAX_SPLIT_COUNT, fallback = 1 } = {}) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return fallback;
@@ -12,8 +14,8 @@ export function getEffectiveSplitCounts(width, height, rows, columns) {
   const safeHeight = Number.isInteger(height) && height > 0 ? height : 1;
 
   return {
-    rows: Math.min(normalizeSplitCount(rows, { max: Math.max(1, safeHeight) }), safeHeight),
-    columns: Math.min(normalizeSplitCount(columns, { max: Math.max(1, safeWidth) }), safeWidth),
+    rows: Math.min(normalizeSplitCount(rows, { max: Math.min(MAX_SPLIT_COUNT, Math.max(1, safeHeight)) }), safeHeight),
+    columns: Math.min(normalizeSplitCount(columns, { max: Math.min(MAX_SPLIT_COUNT, Math.max(1, safeWidth)) }), safeWidth),
   };
 }
 
