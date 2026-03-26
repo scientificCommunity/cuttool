@@ -1,13 +1,134 @@
+function buildSections(cutoutHref) {
+  return [
+    {
+      key: "ready",
+      eyebrow: "Live Now",
+      title: "已接入",
+      description: "这些工具已经可以直接打开使用。",
+      tools: [
+        {
+          key: "cutout",
+          name: "抠图",
+          category: "图像处理",
+          status: "Ready",
+          state: "active",
+          href: cutoutHref,
+          summary: "自动识别边缘背景并生成透明结果，再用画笔做局部擦除和恢复，适合作为轻量的本地图片处理入口。",
+          features: ["自动去底", "手动修边", "撤销重置", "导出 PNG"],
+          metricLabel: "本地运行",
+          metricValue: "100%",
+        },
+      ],
+    },
+    {
+      key: "planned",
+      eyebrow: "Pipeline",
+      title: "规划中",
+      description: "先把工具矩阵和卡片信息铺开，后续可以按这个结构逐个接入。",
+      tools: [
+        {
+          key: "background-replace",
+          name: "背景替换",
+          category: "图像处理",
+          status: "Planned",
+          state: "planned",
+          summary: "在已有主体分离结果上快速换成纯色、渐变或上传背景，适合商品图和头像素材。",
+          features: ["纯色背景", "渐变模板", "背景上传", "一键导出"],
+          metricLabel: "阶段",
+          metricValue: "P1",
+        },
+        {
+          key: "resize-batch",
+          name: "批量改尺寸",
+          category: "批量处理",
+          status: "Planned",
+          state: "planned",
+          summary: "批量导入图片并统一按电商平台、社媒封面或头像尺寸裁切导出，减少重复手工操作。",
+          features: ["预设尺寸", "批量导出", "裁切对齐", "比例锁定"],
+          metricLabel: "阶段",
+          metricValue: "P1",
+        },
+        {
+          key: "format-convert",
+          name: "格式转换",
+          category: "格式工具",
+          status: "Planned",
+          state: "planned",
+          summary: "面向常见图片格式的快速转换页，聚焦浏览器内完成的轻量处理，不依赖服务端。",
+          features: ["PNG 转 JPG", "透明保留", "质量调节", "批量导出"],
+          metricLabel: "阶段",
+          metricValue: "P2",
+        },
+        {
+          key: "poster-crop",
+          name: "海报裁切",
+          category: "内容制作",
+          status: "Planned",
+          state: "planned",
+          summary: "为长图、横版 banner 和平台封面准备的安全区域裁切工具，优先解决多端比例适配。",
+          features: ["安全区", "多端比例", "参考线", "多稿导出"],
+          metricLabel: "阶段",
+          metricValue: "P2",
+        },
+        {
+          key: "compress",
+          name: "图片压缩",
+          category: "格式工具",
+          status: "Planned",
+          state: "planned",
+          summary: "按目标体积或清晰度上限压缩图片，适合上传前预处理和落地页资源瘦身。",
+          features: ["目标体积", "质量对比", "尺寸联动", "批量模式"],
+          metricLabel: "阶段",
+          metricValue: "P3",
+        },
+        {
+          key: "watermark",
+          name: "水印工具",
+          category: "内容制作",
+          status: "Planned",
+          state: "planned",
+          summary: "面向品牌物料的批量文字或图片水印叠加工具，适合商品图、海报和宣发素材。",
+          features: ["文字水印", "图片水印", "透明度调节", "批量叠加"],
+          metricLabel: "阶段",
+          metricValue: "P3",
+        },
+      ],
+    },
+  ];
+}
+
+function countToolsByState(sections, state) {
+  return sections.flatMap((section) => section.tools).filter((tool) => tool.state === state).length;
+}
+
+function getCardStyle(tool) {
+  if (tool.state === "active") {
+    return {
+      border: "1px solid rgba(56,189,248,0.24)",
+      background:
+        "radial-gradient(circle at top right, rgba(34,197,94,0.16), transparent 26%), linear-gradient(180deg, rgba(15,23,42,0.96), rgba(8,15,29,0.92))",
+      boxShadow: "0 24px 72px rgba(0,0,0,0.28)",
+    };
+  }
+
+  return {
+    border: "1px solid rgba(148,163,184,0.14)",
+    background:
+      "linear-gradient(180deg, rgba(15,23,42,0.88), rgba(8,15,29,0.82))",
+    boxShadow: "0 18px 56px rgba(0,0,0,0.22)",
+  };
+}
+
 const styles = {
   page: {
     minHeight: "100vh",
-    padding: "32px 24px 40px",
+    padding: "32px 24px 48px",
     background:
       "radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 28%), radial-gradient(circle at top right, rgba(245,158,11,0.16), transparent 26%), linear-gradient(180deg, #07111f 0%, #020617 62%, #02050b 100%)",
     color: "#e2e8f0",
   },
   shell: {
-    width: "min(1180px, 100%)",
+    width: "min(1220px, 100%)",
     margin: "0 auto",
   },
   topRow: {
@@ -44,13 +165,13 @@ const styles = {
   },
   hero: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1.2fr) minmax(280px, 0.8fr)",
+    gridTemplateColumns: "minmax(0, 1.25fr) minmax(300px, 0.75fr)",
     gap: "24px",
     alignItems: "stretch",
-    marginBottom: "28px",
+    marginBottom: "34px",
   },
   heroCard: {
-    padding: "32px",
+    padding: "34px",
     borderRadius: "32px",
     border: "1px solid rgba(148,163,184,0.16)",
     background: "linear-gradient(180deg, rgba(15,23,42,0.92), rgba(7,12,24,0.88))",
@@ -69,7 +190,7 @@ const styles = {
   },
   title: {
     margin: "18px 0 0",
-    fontSize: "clamp(40px, 7vw, 72px)",
+    fontSize: "clamp(42px, 7vw, 76px)",
     lineHeight: 0.94,
     letterSpacing: "-0.06em",
     color: "#f8fafc",
@@ -134,27 +255,70 @@ const styles = {
     lineHeight: 1.8,
     color: "#dbeafe",
   },
-  sectionTitle: {
-    margin: "0 0 16px",
-    fontSize: "20px",
+  laneGrid: {
+    display: "grid",
+    gap: "24px",
+  },
+  laneCard: {
+    padding: "24px",
+    borderRadius: "28px",
+    border: "1px solid rgba(148,163,184,0.14)",
+    background: "rgba(15,23,42,0.52)",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+  },
+  laneHead: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    gap: "18px",
+    flexWrap: "wrap",
+    marginBottom: "18px",
+  },
+  laneEyebrow: {
+    fontSize: "12px",
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    color: "#7dd3fc",
+    marginBottom: "8px",
+  },
+  laneTitle: {
+    margin: 0,
+    fontSize: "24px",
     fontWeight: 700,
     color: "#f8fafc",
   },
+  laneText: {
+    margin: "8px 0 0",
+    fontSize: "14px",
+    lineHeight: 1.75,
+    color: "#94a3b8",
+    maxWidth: "62ch",
+  },
+  laneCount: {
+    padding: "10px 14px",
+    borderRadius: "16px",
+    background: "rgba(2,6,23,0.62)",
+    border: "1px solid rgba(148,163,184,0.14)",
+    fontSize: "13px",
+    color: "#cbd5e1",
+    whiteSpace: "nowrap",
+  },
   toolGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-    gap: "20px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(270px, 1fr))",
+    gap: "18px",
   },
   toolCard: {
     display: "block",
-    padding: "24px",
-    borderRadius: "28px",
-    border: "1px solid rgba(148,163,184,0.16)",
-    background: "linear-gradient(180deg, rgba(15,23,42,0.94), rgba(8,15,29,0.9))",
-    boxShadow: "0 24px 72px rgba(0,0,0,0.28)",
+    padding: "22px",
+    borderRadius: "26px",
     color: "inherit",
     textDecoration: "none",
+    minHeight: "100%",
     transition: "transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease",
+  },
+  plannedCard: {
+    cursor: "default",
   },
   toolMeta: {
     display: "flex",
@@ -163,7 +327,7 @@ const styles = {
     gap: "16px",
     marginBottom: "18px",
   },
-  toolTag: {
+  toolCategory: {
     display: "inline-flex",
     alignItems: "center",
     padding: "8px 12px",
@@ -173,21 +337,21 @@ const styles = {
     fontSize: "13px",
     fontWeight: 700,
   },
-  toolState: {
+  toolStatus: {
     fontSize: "12px",
-    color: "#86efac",
     letterSpacing: "0.08em",
     textTransform: "uppercase",
+    fontWeight: 700,
   },
   toolName: {
     margin: 0,
-    fontSize: "32px",
+    fontSize: "30px",
     lineHeight: 1,
     fontWeight: 800,
     letterSpacing: "-0.05em",
     color: "#f8fafc",
   },
-  toolDesc: {
+  summary: {
     margin: "16px 0 0",
     fontSize: "14px",
     lineHeight: 1.75,
@@ -207,23 +371,38 @@ const styles = {
     fontSize: "13px",
     color: "#cbd5e1",
   },
-  toolFooter: {
+  footer: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
     gap: "12px",
-    marginTop: "24px",
-    fontSize: "14px",
+    marginTop: "22px",
+    paddingTop: "18px",
+    borderTop: "1px solid rgba(148,163,184,0.12)",
   },
-  openHint: {
+  metric: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+  },
+  metricLabel: {
+    fontSize: "12px",
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
     color: "#94a3b8",
   },
-  openAction: {
+  metricValue: {
+    fontSize: "16px",
+    fontWeight: 800,
     color: "#f8fafc",
+  },
+  action: {
+    fontSize: "14px",
     fontWeight: 700,
+    color: "#f8fafc",
   },
   note: {
-    marginTop: "18px",
+    marginTop: "20px",
     fontSize: "13px",
     lineHeight: 1.8,
     color: "#94a3b8",
@@ -231,13 +410,17 @@ const styles = {
 };
 
 const homeCss = `
-  .tool-card:hover {
-    transform: translateY(-4px);
-    border-color: rgba(125, 211, 252, 0.34);
-    box-shadow: 0 30px 90px rgba(2, 132, 199, 0.16), 0 24px 72px rgba(0, 0, 0, 0.3);
+  .tools-hero {
+    position: relative;
   }
 
-  .tool-card:focus-visible {
+  .tool-card--active:hover {
+    transform: translateY(-4px);
+    border-color: rgba(125, 211, 252, 0.36) !important;
+    box-shadow: 0 30px 90px rgba(2, 132, 199, 0.16), 0 24px 72px rgba(0, 0, 0, 0.3) !important;
+  }
+
+  .tool-card--active:focus-visible {
     outline: 2px solid #38bdf8;
     outline-offset: 3px;
   }
@@ -250,6 +433,11 @@ const homeCss = `
 `;
 
 export default function ToolsHomePage({ cutoutHref }) {
+  const sections = buildSections(cutoutHref);
+  const totalCount = sections.flatMap((section) => section.tools).length;
+  const readyCount = countToolsByState(sections, "active");
+  const plannedCount = countToolsByState(sections, "planned");
+
   return (
     <div style={styles.page}>
       <style>{homeCss}</style>
@@ -259,7 +447,7 @@ export default function ToolsHomePage({ cutoutHref }) {
             <span style={styles.dot} />
             Tool Shelf
           </div>
-          <div style={styles.miniNote}>首页已经改成工具集入口，后续工具可以继续往这里加。</div>
+          <div style={styles.miniNote}>首页现在已经扩成多工具卡片布局，后续接工具只需要补路由和页面即可。</div>
         </div>
 
         <section className="tools-hero" style={styles.hero}>
@@ -267,65 +455,118 @@ export default function ToolsHomePage({ cutoutHref }) {
             <div style={styles.heroEyebrow}>Browser First</div>
             <h1 style={styles.title}>工具集</h1>
             <p style={styles.subtitle}>
-              这里作为所有小工具的统一入口。当前已接入的第一个工具是
-              “抠图”，保留了原来主页上的全部能力，包括自动去底、手动修边和透明
-              PNG 导出。
+              这里作为所有小工具的统一入口。当前“抠图”已经接入可用，其他卡片先按工具矩阵的方式排开，后续可以逐个落成真实页面。
             </p>
             <div style={styles.heroFooter}>
               <div style={styles.heroChip}>
-                <span style={styles.chipValue}>1</span>
-                已接入工具
+                <span style={styles.chipValue}>{totalCount}</span>
+                工具卡片
               </div>
               <div style={styles.heroChip}>
-                <span style={styles.chipValue}>0</span>
-                服务端依赖
+                <span style={styles.chipValue}>{readyCount}</span>
+                已接入
               </div>
               <div style={styles.heroChip}>
-                <span style={styles.chipValue}>PNG</span>
-                本地导出
+                <span style={styles.chipValue}>{plannedCount}</span>
+                规划中
               </div>
             </div>
           </div>
 
           <aside style={styles.sideCard}>
-            <p style={styles.sideTitle}>当前工具</p>
+            <p style={styles.sideTitle}>当前焦点</p>
             <div style={styles.sideBig}>抠图</div>
             <p style={styles.sideText}>
-              适合白底、纯色底、拍摄背景较干净的图片。处理过程全在浏览器里完成，不走上传。
+              当前唯一可直接进入的工具，保留了自动去底、手动修边和透明 PNG 导出能力。其余工具先以卡片形式占位，方便继续扩展。
             </p>
           </aside>
         </section>
 
-        <section>
-          <h2 style={styles.sectionTitle}>工具列表</h2>
-          <div style={styles.toolGrid}>
-            <a
-              className="tool-card"
-              href={cutoutHref}
-              style={styles.toolCard}
-            >
-              <div style={styles.toolMeta}>
-                <span style={styles.toolTag}>图像处理</span>
-                <span style={styles.toolState}>Ready</span>
+        <div style={styles.laneGrid}>
+          {sections.map((section) => (
+            <section key={section.key} style={styles.laneCard}>
+              <div style={styles.laneHead}>
+                <div>
+                  <div style={styles.laneEyebrow}>{section.eyebrow}</div>
+                  <h2 style={styles.laneTitle}>{section.title}</h2>
+                  <p style={styles.laneText}>{section.description}</p>
+                </div>
+                <div style={styles.laneCount}>{section.tools.length} 张卡片</div>
               </div>
-              <h3 style={styles.toolName}>抠图</h3>
-              <p style={styles.toolDesc}>
-                自动识别边缘背景并生成透明结果，再用画笔做局部擦除和恢复。适合作为一个轻量、本地运行的商品图处理入口。
-              </p>
-              <div style={styles.featureList}>
-                <span style={styles.feature}>自动去底</span>
-                <span style={styles.feature}>手动修边</span>
-                <span style={styles.feature}>撤销重置</span>
-                <span style={styles.feature}>导出 PNG</span>
+
+              <div style={styles.toolGrid}>
+                {section.tools.map((tool) => {
+                  const cardStyle = getCardStyle(tool);
+                  const statusColor = tool.state === "active" ? "#86efac" : "#fbbf24";
+
+                  if (tool.href) {
+                    return (
+                      <a
+                        key={tool.key}
+                        href={tool.href}
+                        className="tool-card--active"
+                        style={{ ...styles.toolCard, ...cardStyle }}
+                      >
+                        <div style={styles.toolMeta}>
+                          <span style={styles.toolCategory}>{tool.category}</span>
+                          <span style={{ ...styles.toolStatus, color: statusColor }}>{tool.status}</span>
+                        </div>
+                        <h3 style={styles.toolName}>{tool.name}</h3>
+                        <p style={styles.summary}>{tool.summary}</p>
+                        <div style={styles.featureList}>
+                          {tool.features.map((feature) => (
+                            <span key={feature} style={styles.feature}>
+                              {feature}
+                            </span>
+                          ))}
+                        </div>
+                        <div style={styles.footer}>
+                          <div style={styles.metric}>
+                            <span style={styles.metricLabel}>{tool.metricLabel}</span>
+                            <span style={styles.metricValue}>{tool.metricValue}</span>
+                          </div>
+                          <span style={styles.action}>进入工具</span>
+                        </div>
+                      </a>
+                    );
+                  }
+
+                  return (
+                    <article
+                      key={tool.key}
+                      aria-disabled="true"
+                      className="tool-card--planned"
+                      style={{ ...styles.toolCard, ...styles.plannedCard, ...cardStyle }}
+                    >
+                      <div style={styles.toolMeta}>
+                        <span style={styles.toolCategory}>{tool.category}</span>
+                        <span style={{ ...styles.toolStatus, color: statusColor }}>{tool.status}</span>
+                      </div>
+                      <h3 style={styles.toolName}>{tool.name}</h3>
+                      <p style={styles.summary}>{tool.summary}</p>
+                      <div style={styles.featureList}>
+                        {tool.features.map((feature) => (
+                          <span key={feature} style={styles.feature}>
+                            {feature}
+                          </span>
+                        ))}
+                      </div>
+                      <div style={styles.footer}>
+                        <div style={styles.metric}>
+                          <span style={styles.metricLabel}>{tool.metricLabel}</span>
+                          <span style={styles.metricValue}>{tool.metricValue}</span>
+                        </div>
+                        <span style={{ ...styles.action, color: "#94a3b8" }}>即将上线</span>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
-              <div style={styles.toolFooter}>
-                <span style={styles.openHint}>打开工具页继续处理图片</span>
-                <span style={styles.openAction}>进入</span>
-              </div>
-            </a>
-          </div>
-          <div style={styles.note}>后续如果要继续加工具，直接按这个卡片结构扩展即可。</div>
-        </section>
+            </section>
+          ))}
+        </div>
+
+        <div style={styles.note}>后续如果你要继续加工具，我可以直接把规划中的某一张卡片接成真实页面并挂到当前首页结构里。</div>
       </div>
     </div>
   );
