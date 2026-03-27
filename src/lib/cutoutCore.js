@@ -88,14 +88,35 @@ function buildBorderPalette(data, width, height) {
   pushSample(0, height - 1);
   pushSample(width - 1, height - 1);
 
-  const palette = [];
+  const clusters = [];
   for (const sample of samples) {
     const [r, g, b] = sample;
-    const exists = palette.some(([pr, pg, pb]) => colorDistanceSq(r, g, b, pr, pg, pb) < 28 * 28);
-    if (!exists) {
-      palette.push(sample);
+    const cluster = clusters.find(({ r: cr, g: cg, b: cb }) => colorDistanceSq(r, g, b, cr, cg, cb) < 28 * 28);
+
+    if (cluster) {
+      const nextCount = cluster.count + 1;
+      cluster.r = Math.round((cluster.r * cluster.count + r) / nextCount);
+      cluster.g = Math.round((cluster.g * cluster.count + g) / nextCount);
+      cluster.b = Math.round((cluster.b * cluster.count + b) / nextCount);
+      cluster.count = nextCount;
+    } else {
+      clusters.push({ r, g, b, count: 1 });
     }
-    if (palette.length >= 10) {
+  }
+
+  clusters.sort((left, right) => right.count - left.count);
+
+  const palette = [];
+  let coveredSamples = 0;
+  for (let index = 0; index < clusters.length; index += 1) {
+    const cluster = clusters[index];
+    palette.push([cluster.r, cluster.g, cluster.b]);
+    coveredSamples += cluster.count;
+
+    const coverage = coveredSamples / Math.max(1, samples.length);
+    const nextClusterCount = clusters[index + 1]?.count ?? 0;
+
+    if (palette.length >= 8 || coverage >= 0.88 || (coverage >= 0.72 && nextClusterCount <= 1)) {
       break;
     }
   }
@@ -565,6 +586,41 @@ export function runInternalTests() {
     add("自动去底会产出有效蒙版", mask instanceof Uint8ClampedArray && mask.length === 4);
   } catch (error) {
     add("自动去底会产出有效蒙版", false, String(error));
+  }
+
+  try {
+    const width = 9;
+    const height = 9;
+    const data = new Uint8ClampedArray(width * height * 4);
+
+    for (let index = 0; index < data.length; index += 4) {
+      data[index] = 255;
+      data[index + 1] = 255;
+      data[index + 2] = 255;
+      data[index + 3] = 255;
+    }
+
+    const darkPixels = [
+      [4, 0],
+      [4, 1],
+      [4, 2],
+      [4, 3],
+      [3, 1],
+      [5, 1],
+    ];
+
+    for (const [x, y] of darkPixels) {
+      const offset = (y * width + x) * 4;
+      data[offset] = 32;
+      data[offset + 1] = 32;
+      data[offset + 2] = 32;
+    }
+
+    const mask = buildAutoMask({ width, height, data }, 16);
+    const topCenter = mask[4];
+    add("主体贴边时不应污染背景色板", topCenter >= 220, `alpha=${topCenter}`);
+  } catch (error) {
+    add("主体贴边时不应污染背景色板", false, String(error));
   }
 
   return tests;

@@ -11,6 +11,7 @@ import {
   checkerboardStyle,
   getSafeImageData,
   renderMaskedImageToCanvas,
+  runInternalTests,
 } from "../lib/cutoutCore.js";
 import {
   normalizeMaskRefineConfig,
@@ -718,7 +719,11 @@ export default function VideoFrameToolPage({ homeHref }) {
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [frames, setFrames] = useState([]);
   const [status, setStatus] = useState("上传视频后，可以按张数、FPS 或时间间隔抽出关键帧，并导出 PNG。");
-  const [testResults] = useState(() => [...runVideoFrameTests(), ...runMaskRefineTests()]);
+  const [testResults] = useState(() => [
+    ...runVideoFrameTests(),
+    ...runMaskRefineTests(),
+    ...runInternalTests(),
+  ]);
   const checkerboard = useMemo(() => checkerboardStyle(), []);
 
   const currentProcessConfig = useMemo(
