@@ -23,6 +23,7 @@ import {
   createVideoFrameFileName,
   formatDurationLabel,
   normalizeFrameCount,
+  normalizeFramesPerSecond,
   normalizeIntervalSeconds,
   runVideoFrameTests,
 } from "../lib/videoFrameCore.js";
@@ -56,6 +57,7 @@ const styles = {
     fontWeight: 700,
   },
   videoShell: {
+    position: "relative",
     overflow: "hidden",
     borderRadius: "18px",
     border: "1px solid #1e293b",
@@ -179,6 +181,26 @@ const styles = {
     width: "16px",
     height: "16px",
     accentColor: "#38bdf8",
+  },
+  cropButtonRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "8px",
+  },
+  cropOverlay: {
+    position: "absolute",
+    inset: 0,
+  },
+  cropShade: {
+    position: "absolute",
+    inset: 0,
+    background: "rgba(2,6,23,0.2)",
+  },
+  cropBox: {
+    position: "absolute",
+    border: "2px solid #38bdf8",
+    boxShadow: "0 0 0 9999px rgba(2,6,23,0.36)",
+    background: "rgba(56,189,248,0.12)",
   },
 };
 
@@ -354,7 +376,152 @@ function sameProcessConfig(left, right) {
   );
 }
 
-function drawFrameToCanvas(video, canvas, maxSide = null) {
+function normalizeCropRect(rect, sourceWidth, sourceHeight) {
+  if (!rect || !sourceWidth || !sourceHeight) {
+    return null;
+  }
+
+  const x = Math.max(0, Math.min(sourceWidth - 1, Math.round(rect.x)));
+  const y = Math.max(0, Math.min(sourceHeight - 1, Math.round(rect.y)));
+  const right = Math.max(x + 1, Math.min(sourceWidth, Math.round(rect.x + rect.width)));
+  const bottom = Math.max(y + 1, Math.min(sourceHeight, Math.round(rect.y + rect.height)));
+  const width = right - x;
+  const height = bottom - y;
+
+  if (width < 2 || height < 2) {
+    return null;
+  }
+
+  return { x, y, width, height };
+}
+
+function sameCropRect(left, right) {
+  if (!left && !right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return left.x === right.x && left.y === right.y && left.width === right.width && left.height === right.height;
+}
+
+function describeCropRect(rect, sourceWidth, sourceHeight) {
+  if (!rect) {
+    return "未框选，默认提取整张画面。";
+  }
+
+  const widthRatio = ((rect.width / sourceWidth) * 100).toFixed(1);
+  const heightRatio = ((rect.height / sourceHeight) * 100).toFixed(1);
+  return `已框选区域：x ${rect.x}px，y ${rect.y}px，宽 ${rect.width}px，高 ${rect.height}px，占原画面 ${widthRatio}% × ${heightRatio}%。`;
+}
+
+function getOverlayCropStyle(rect, sourceWidth, sourceHeight) {
+  if (!rect || !sourceWidth || !sourceHeight) {
+    return null;
+  }
+
+  return {
+    left: `${(rect.x / sourceWidth) * 100}%`,
+    top: `${(rect.y / sourceHeight) * 100}%`,
+    width: `${(rect.width / sourceWidth) * 100}%`,
+    height: `${(rect.height / sourceHeight) * 100}%`,
+  };
+}
+
+async function estimateVideoFrameRate(videoUrl) {
+  if (typeof document === "undefined" || !videoUrl) {
+    return null;
+  }
+
+  const probe = document.createElement("video");
+  probe.preload = "auto";
+  probe.muted = true;
+  probe.playsInline = true;
+  probe.src = videoUrl;
+
+  try {
+    await waitForVideoLoaded(probe);
+
+    if (typeof probe.requestVideoFrameCallback !== "function") {
+      return null;
+    }
+
+    const sampleStart = Math.min(0.2, Math.max(0, (probe.duration || 0) / 10));
+    await seekVideo(probe, sampleStart);
+
+    return await new Promise((resolve) => {
+      let startMediaTime = null;
+      let startFrames = null;
+      let lastMediaTime = null;
+      let lastFrames = null;
+      let callbacks = 0;
+      let settled = false;
+
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        window.clearTimeout(timeoutId);
+        probe.pause();
+
+        if (
+          startMediaTime == null ||
+          lastMediaTime == null ||
+          startFrames == null ||
+          lastFrames == null ||
+          lastMediaTime <= startMediaTime ||
+          lastFrames <= startFrames
+        ) {
+          resolve(null);
+          return;
+        }
+
+        const fps = (lastFrames - startFrames) / (lastMediaTime - startMediaTime);
+        resolve(Number.isFinite(fps) && fps > 0 ? Math.round(fps * 100) / 100 : null);
+      };
+
+      const timeoutId = window.setTimeout(finish, 1500);
+
+      const onFrame = (_now, metadata) => {
+        if (settled) {
+          return;
+        }
+
+        if (startMediaTime == null) {
+          startMediaTime = metadata.mediaTime;
+          startFrames = metadata.presentedFrames;
+        }
+
+        lastMediaTime = metadata.mediaTime;
+        lastFrames = metadata.presentedFrames;
+        callbacks += 1;
+
+        if (callbacks >= 8 || metadata.mediaTime - startMediaTime >= 0.45) {
+          finish();
+          return;
+        }
+
+        probe.requestVideoFrameCallback(onFrame);
+      };
+
+      probe.requestVideoFrameCallback(onFrame);
+      probe.play().catch(() => finish());
+    });
+  } catch (error) {
+    console.warn("视频帧率估算失败", error);
+    return null;
+  } finally {
+    probe.pause();
+    probe.removeAttribute("src");
+    probe.load();
+  }
+}
+
+function drawFrameToCanvas(video, canvas, maxSide = null, cropRect = null) {
   const sourceWidth = video.videoWidth;
   const sourceHeight = video.videoHeight;
 
@@ -362,9 +529,15 @@ function drawFrameToCanvas(video, canvas, maxSide = null) {
     throw new Error("视频尺寸无效");
   }
 
-  const scale = maxSide ? Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight)) : 1;
-  const drawWidth = Math.max(1, Math.round(sourceWidth * scale));
-  const drawHeight = Math.max(1, Math.round(sourceHeight * scale));
+  const normalizedCrop = normalizeCropRect(cropRect, sourceWidth, sourceHeight);
+  const cropWidth = normalizedCrop?.width || sourceWidth;
+  const cropHeight = normalizedCrop?.height || sourceHeight;
+  const cropX = normalizedCrop?.x || 0;
+  const cropY = normalizedCrop?.y || 0;
+
+  const scale = maxSide ? Math.min(1, maxSide / Math.max(cropWidth, cropHeight)) : 1;
+  const drawWidth = Math.max(1, Math.round(cropWidth * scale));
+  const drawHeight = Math.max(1, Math.round(cropHeight * scale));
 
   canvas.width = drawWidth;
   canvas.height = drawHeight;
@@ -375,7 +548,7 @@ function drawFrameToCanvas(video, canvas, maxSide = null) {
   }
 
   ctx.clearRect(0, 0, drawWidth, drawHeight);
-  ctx.drawImage(video, 0, 0, drawWidth, drawHeight);
+  ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, drawWidth, drawHeight);
 
   return {
     width: drawWidth,
@@ -437,11 +610,14 @@ export default function VideoFrameToolPage({ homeHref }) {
   const scratchCanvasRef = useRef(null);
   const previewFramesRef = useRef([]);
   const videoUrlRef = useRef("");
+  const cropDraftRef = useRef(null);
 
   const [videoMeta, setVideoMeta] = useState(null);
+  const [estimatedFps, setEstimatedFps] = useState(null);
   const [mode, setMode] = useState("count");
   const [outputMode, setOutputMode] = useState("raw");
   const [frameCount, setFrameCount] = useState(12);
+  const [framesPerSecond, setFramesPerSecond] = useState(2);
   const [intervalSeconds, setIntervalSeconds] = useState(1);
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(0);
@@ -449,6 +625,8 @@ export default function VideoFrameToolPage({ homeHref }) {
   const [contractPx, setContractPx] = useState(1);
   const [featherPx, setFeatherPx] = useState(1);
   const [despeckle, setDespeckle] = useState(true);
+  const [cropMode, setCropMode] = useState(false);
+  const [cropRect, setCropRect] = useState(null);
   const [extracting, setExtracting] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [downloadingOneId, setDownloadingOneId] = useState(null);
@@ -479,18 +657,20 @@ export default function VideoFrameToolPage({ homeHref }) {
       mode,
       frameCount,
       intervalSeconds,
+      framesPerSecond,
       startTime,
       endTime,
     });
-  }, [endTime, frameCount, intervalSeconds, mode, startTime, videoMeta]);
+  }, [endTime, frameCount, framesPerSecond, intervalSeconds, mode, startTime, videoMeta]);
 
   const metaText = useMemo(() => {
     if (!videoMeta) {
       return "还没有载入视频";
     }
 
-    return `${videoMeta.name} · ${videoMeta.width} × ${videoMeta.height} · ${formatDurationLabel(videoMeta.duration)}`;
-  }, [videoMeta]);
+    const fpsLabel = estimatedFps ? ` · ${estimatedFps} fps` : "";
+    return `${videoMeta.name} · ${videoMeta.width} × ${videoMeta.height} · ${formatDurationLabel(videoMeta.duration)}${fpsLabel}`;
+  }, [estimatedFps, videoMeta]);
 
   const planSummary = useMemo(() => {
     if (!videoMeta || !plan) {
@@ -501,6 +681,8 @@ export default function VideoFrameToolPage({ homeHref }) {
     const ruleText =
       mode === "count"
         ? `按数量均匀抽 ${plan.actualFrames} 张`
+        : mode === "fps"
+          ? `按每秒 ${plan.framesPerSecond} 帧抽取，共 ${plan.actualFrames} 张`
         : `每 ${plan.stepSeconds} 秒抽一张，共 ${plan.actualFrames} 张`;
     const limitText = plan.limitedByMaxFrames ? `；已自动限制在 ${MAX_EXTRACT_FRAMES} 张以内。` : "。";
 
@@ -524,6 +706,23 @@ export default function VideoFrameToolPage({ homeHref }) {
     return !sameProcessConfig(currentProcessConfig, extractedProcessConfig);
   }, [currentProcessConfig, extractedProcessConfig, frames.length]);
 
+  const cropSummary = useMemo(() => {
+    if (!videoMeta) {
+      return "等待视频载入。";
+    }
+
+    return describeCropRect(cropRect, videoMeta.width, videoMeta.height);
+  }, [cropRect, videoMeta]);
+
+  const extractedCropRect = frames[0]?.cropRect || null;
+  const cropSettingsDirty = useMemo(() => {
+    if (!frames.length) {
+      return false;
+    }
+
+    return !sameCropRect(cropRect, extractedCropRect);
+  }, [cropRect, extractedCropRect, frames.length]);
+
   useEffect(() => {
     previewFramesRef.current = frames;
   }, [frames]);
@@ -534,6 +733,26 @@ export default function VideoFrameToolPage({ homeHref }) {
       URL.revokeObjectURL(videoUrlRef.current);
     }
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!videoMeta || !videoUrlRef.current) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    estimateVideoFrameRate(videoUrlRef.current).then((fps) => {
+      if (!cancelled) {
+        setEstimatedFps(fps);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [videoMeta]);
 
   const controlsDisabled = extracting || downloadingAll || Boolean(downloadingOneId);
 
@@ -560,9 +779,13 @@ export default function VideoFrameToolPage({ homeHref }) {
   const clearLoadedState = () => {
     setPreviewFrames([]);
     setVideoMeta(null);
+    setEstimatedFps(null);
     setStartTime(0);
     setEndTime(0);
+    setCropRect(null);
+    setCropMode(false);
     scratchCanvasRef.current = null;
+    cropDraftRef.current = null;
     resetVideoSource();
   };
 
@@ -623,18 +846,91 @@ export default function VideoFrameToolPage({ homeHref }) {
     return outputCanvasRef.current;
   };
 
-  const captureFrameImageDataAtTime = async (time, { maxSide = null } = {}) => {
+  const getCropPointFromEvent = (event) => {
+    const video = videoRef.current;
+    if (!video || !videoMeta) {
+      return null;
+    }
+
+    const rect = video.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      return null;
+    }
+
+    const x = Math.max(0, Math.min(videoMeta.width, ((event.clientX - rect.left) / rect.width) * videoMeta.width));
+    const y = Math.max(0, Math.min(videoMeta.height, ((event.clientY - rect.top) / rect.height) * videoMeta.height));
+
+    return { x, y };
+  };
+
+  const updateCropRectFromPoints = (startPoint, endPoint) => {
+    if (!videoMeta || !startPoint || !endPoint) {
+      return null;
+    }
+
+    const left = Math.min(startPoint.x, endPoint.x);
+    const top = Math.min(startPoint.y, endPoint.y);
+    const width = Math.abs(endPoint.x - startPoint.x);
+    const height = Math.abs(endPoint.y - startPoint.y);
+
+    return normalizeCropRect({ x: left, y: top, width, height }, videoMeta.width, videoMeta.height);
+  };
+
+  const handleCropPointerDown = (event) => {
+    if (!cropMode || !videoMeta) {
+      return;
+    }
+
+    const point = getCropPointFromEvent(event);
+    if (!point) {
+      return;
+    }
+
+    cropDraftRef.current = {
+      pointerId: event.pointerId,
+      startPoint: point,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setCropRect(normalizeCropRect({ x: point.x, y: point.y, width: 2, height: 2 }, videoMeta.width, videoMeta.height));
+  };
+
+  const handleCropPointerMove = (event) => {
+    if (!cropMode || !videoMeta || cropDraftRef.current?.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const point = getCropPointFromEvent(event);
+    if (!point) {
+      return;
+    }
+
+    setCropRect(updateCropRectFromPoints(cropDraftRef.current.startPoint, point));
+  };
+
+  const handleCropPointerUp = (event) => {
+    if (cropDraftRef.current?.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const point = getCropPointFromEvent(event);
+    const nextRect = updateCropRectFromPoints(cropDraftRef.current.startPoint, point);
+    cropDraftRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setCropRect(nextRect);
+  };
+
+  const captureFrameImageDataAtTime = async (time, { maxSide = null, crop = null } = {}) => {
     const video = videoRef.current;
     if (!video) {
       throw new Error("视频尚未初始化");
     }
 
     await seekVideo(video, time);
-    return drawFrameToCanvas(video, ensureCaptureCanvas(), maxSide);
+    return drawFrameToCanvas(video, ensureCaptureCanvas(), maxSide, crop);
   };
 
-  const buildFrameOutputAtTime = async (time, processConfig, { maxSide = null } = {}) => {
-    const { imageData } = await captureFrameImageDataAtTime(time, { maxSide });
+  const buildFrameOutputAtTime = async (time, processConfig, { maxSide = null, crop = null } = {}) => {
+    const { imageData } = await captureFrameImageDataAtTime(time, { maxSide, crop });
     const rendered = await renderProcessedFrameBlob({
       sourceImageData: imageData,
       processConfig,
@@ -657,11 +953,15 @@ export default function VideoFrameToolPage({ homeHref }) {
 
     try {
       const nextFrames = [];
+      const cropAtExtraction = cropRect;
 
       for (let index = 0; index < plan.timestamps.length; index += 1) {
         const time = plan.timestamps[index];
         setStatus(`正在抽取第 ${index + 1} / ${plan.timestamps.length} 张：${formatDurationLabel(time)}`);
-        const { blob, width, height } = await buildFrameOutputAtTime(time, processConfig, { maxSide: PREVIEW_MAX_SIDE });
+        const { blob, width, height } = await buildFrameOutputAtTime(time, processConfig, {
+          maxSide: PREVIEW_MAX_SIDE,
+          crop: cropAtExtraction,
+        });
         nextFrames.push({
           id: `frame-${index + 1}-${time}`,
           index: index + 1,
@@ -671,6 +971,7 @@ export default function VideoFrameToolPage({ homeHref }) {
           previewWidth: width,
           previewHeight: height,
           processConfig,
+          cropRect: cropAtExtraction,
         });
       }
 
@@ -697,7 +998,9 @@ export default function VideoFrameToolPage({ homeHref }) {
     setStatus(`正在导出 ${frame.label} 的${frame.processConfig?.outputMode === "transparent" ? "透明" : "原始"} PNG…`);
 
     try {
-      const { blob } = await buildFrameOutputAtTime(frame.time, frame.processConfig || currentProcessConfig);
+      const { blob } = await buildFrameOutputAtTime(frame.time, frame.processConfig || currentProcessConfig, {
+        crop: frame.cropRect || null,
+      });
       triggerBlobDownload(blob, createVideoFrameFileName(videoMeta.name, frame.index, frame.time));
       setStatus(`已导出第 ${frame.index} 张：${frame.label}。`);
     } catch (error) {
@@ -718,7 +1021,9 @@ export default function VideoFrameToolPage({ homeHref }) {
 
     try {
       for (const frame of frames) {
-        const { blob } = await buildFrameOutputAtTime(frame.time, frame.processConfig || currentProcessConfig);
+        const { blob } = await buildFrameOutputAtTime(frame.time, frame.processConfig || currentProcessConfig, {
+          crop: frame.cropRect || null,
+        });
         triggerBlobDownload(blob, createVideoFrameFileName(videoMeta.name, frame.index, frame.time));
         await new Promise((resolve) => window.setTimeout(resolve, 80));
       }
@@ -733,6 +1038,7 @@ export default function VideoFrameToolPage({ homeHref }) {
   };
 
   const resultPreviewUsesTransparency = frames[0]?.processConfig?.outputMode === "transparent";
+  const overlayCropStyle = videoMeta ? getOverlayCropStyle(cropRect, videoMeta.width, videoMeta.height) : null;
 
   return (
     <ImageToolWorkspace
@@ -767,6 +1073,7 @@ export default function VideoFrameToolPage({ homeHref }) {
             title="抽帧方式"
             options={[
               ["count", "按张数"],
+              ["fps", "按 FPS"],
               ["interval", "按间隔"],
             ]}
           />
@@ -831,6 +1138,28 @@ export default function VideoFrameToolPage({ homeHref }) {
                 disabled={!videoMeta || controlsDisabled}
                 style={styles.numberInput}
               />
+            </div>
+          ) : mode === "fps" ? (
+            <div style={styles.numberCard}>
+              <div style={styles.rowBetween}>
+                <span style={styles.labelInline}>每秒提取</span>
+                <span style={styles.value}>{framesPerSecond} 帧</span>
+              </div>
+              <input
+                type="number"
+                min="0.1"
+                max="60"
+                step="0.1"
+                value={framesPerSecond}
+                onChange={(event) => setFramesPerSecond(normalizeFramesPerSecond(event.target.value))}
+                disabled={!videoMeta || controlsDisabled}
+                style={styles.numberInput}
+              />
+              <div style={styles.mutedTip}>
+                {estimatedFps
+                  ? `当前视频估算帧率约 ${estimatedFps} fps。提取 FPS 高于源视频时，可能会得到重复帧。`
+                  : "当前浏览器没有稳定拿到源视频帧率时，会继续按你填写的 FPS 时间步长抓帧。"}
+              </div>
             </div>
           ) : (
             <div style={styles.numberCard}>
@@ -922,6 +1251,42 @@ export default function VideoFrameToolPage({ homeHref }) {
             </>
           ) : null}
 
+          <div style={styles.toggleCard}>
+            <label style={styles.checkboxRow}>
+              <input
+                type="checkbox"
+                checked={cropMode}
+                onChange={(event) => setCropMode(event.target.checked)}
+                disabled={!videoMeta || controlsDisabled}
+                style={styles.checkbox}
+              />
+              <span>画面框选裁切</span>
+            </label>
+            <div style={styles.mutedTip}>开启后可直接在左侧原视频上拖拽，提取指定区域的图片。未框选时默认输出整张画面。</div>
+            <div style={{ ...styles.cropButtonRow, marginTop: "12px" }}>
+              <button
+                onClick={() => setCropMode((value) => !value)}
+                disabled={!videoMeta || controlsDisabled}
+                style={{
+                  ...styles.secondaryButton,
+                  ...(!videoMeta || controlsDisabled ? styles.buttonDisabled : null),
+                }}
+              >
+                {cropMode ? "关闭框选" : "开始框选"}
+              </button>
+              <button
+                onClick={() => setCropRect(null)}
+                disabled={!cropRect || controlsDisabled}
+                style={{
+                  ...styles.secondaryButton,
+                  ...(!cropRect || controlsDisabled ? styles.buttonDisabled : null),
+                }}
+              >
+                清空选区
+              </button>
+            </div>
+          </div>
+
           <div style={styles.buttonGrid}>
             <button
               onClick={extractFrames}
@@ -947,9 +1312,15 @@ export default function VideoFrameToolPage({ homeHref }) {
 
           <StatusCard body={status} />
           <StatusCard title="抽帧方案" body={planSummary} />
+          <StatusCard title="裁切区域" body={cropSummary} />
           <StatusCard title="当前输出" body={processSummary} />
-          {processSettingsDirty ? (
-            <StatusCard title="参数变更提醒" body="你已经修改了透明输出参数。当前右侧预览仍然是上一次抽帧结果，点击“开始抽帧”后才会重新生成。" />
+          {processSettingsDirty || cropSettingsDirty ? (
+            <StatusCard
+              title="参数变更提醒"
+              body={`${
+                processSettingsDirty ? "透明输出参数已变更。" : ""
+              }${cropSettingsDirty ? " 框选区域已变更。" : ""}当前右侧预览仍然是上一次抽帧结果，点击“开始抽帧”后才会重新生成。`}
+            />
           ) : null}
           <SelfTestCard tests={testResults} />
         </>
@@ -973,9 +1344,28 @@ export default function VideoFrameToolPage({ homeHref }) {
               display: videoMeta ? "block" : "none",
             }}
           />
+          {videoMeta ? (
+            <div
+              style={{
+                ...styles.cropOverlay,
+                pointerEvents: cropMode ? "auto" : "none",
+                cursor: cropMode ? "crosshair" : "default",
+              }}
+              onPointerDown={handleCropPointerDown}
+              onPointerMove={handleCropPointerMove}
+              onPointerUp={handleCropPointerUp}
+            >
+              {overlayCropStyle ? (
+                <div style={{ ...styles.cropBox, ...overlayCropStyle }} />
+              ) : null}
+            </div>
+          ) : null}
           {videoMeta ? null : <div style={{ ...styles.placeholder, border: "none", borderRadius: 0 }}>上传视频后，这里会显示原视频预览和时间信息。</div>}
         </div>
-        <div style={styles.mutedTip}>抽帧时会复用同一个视频元素逐帧 seek，再抓取成 PNG。复杂编码的视频首次定位可能稍慢。</div>
+        <div style={styles.mutedTip}>
+          抽帧时会复用同一个视频元素逐帧 seek，再抓取成 PNG。复杂编码的视频首次定位可能稍慢。
+          {estimatedFps ? ` 当前视频估算帧率约为 ${estimatedFps} fps。` : " 当前浏览器未稳定拿到源帧率时，会继续显示时长和分辨率信息。"}
+        </div>
       </div>
 
       <div style={styles.canvasCard}>

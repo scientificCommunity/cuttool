@@ -30,6 +30,15 @@ export function normalizeIntervalSeconds(value, { min = 0.1, max = 60, fallback 
   return roundToTenths(clamp(numeric, min, max));
 }
 
+export function normalizeFramesPerSecond(value, { min = 0.1, max = 60, fallback = 1 } = {}) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  return roundToTenths(clamp(numeric, min, max));
+}
+
 export function formatDurationLabel(seconds) {
   const safe = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
   const totalTenths = Math.round(safe * 10);
@@ -57,6 +66,7 @@ export function buildFrameExtractionPlan({
   mode,
   frameCount,
   intervalSeconds,
+  framesPerSecond,
   startTime,
   endTime,
   maxFrames = MAX_EXTRACT_FRAMES,
@@ -76,6 +86,39 @@ export function buildFrameExtractionPlan({
       actualFrames: 0,
       limitedByMaxFrames: false,
       stepSeconds: mode === "interval" ? normalizeIntervalSeconds(intervalSeconds) : null,
+      framesPerSecond: mode === "fps" ? normalizeFramesPerSecond(framesPerSecond) : null,
+    };
+  }
+
+  if (mode === "fps") {
+    const safeFps = normalizeFramesPerSecond(framesPerSecond);
+    const stepSeconds = 1 / safeFps;
+    const timestamps = [];
+    let currentTime = safeStart;
+    let safety = 0;
+
+    while (currentTime <= safeEnd + 0.0005 && timestamps.length < maxFrames && safety < maxFrames * 4) {
+      timestamps.push(roundToMillis(currentTime));
+      currentTime += stepSeconds;
+      safety += 1;
+    }
+
+    if (timestamps.length === 0) {
+      timestamps.push(roundToMillis(safeStart));
+    }
+
+    const estimatedFrames = spanSeconds <= 0 ? 1 : Math.floor(spanSeconds * safeFps) + 1;
+
+    return {
+      mode,
+      startTime: safeStart,
+      endTime: safeEnd,
+      spanSeconds,
+      stepSeconds,
+      timestamps,
+      actualFrames: timestamps.length,
+      limitedByMaxFrames: estimatedFrames > timestamps.length,
+      framesPerSecond: safeFps,
     };
   }
 
@@ -106,6 +149,7 @@ export function buildFrameExtractionPlan({
       timestamps,
       actualFrames: timestamps.length,
       limitedByMaxFrames: estimatedFrames > timestamps.length,
+      framesPerSecond: null,
     };
   }
 
@@ -120,6 +164,7 @@ export function buildFrameExtractionPlan({
       actualFrames: 1,
       limitedByMaxFrames: false,
       stepSeconds: null,
+      framesPerSecond: null,
     };
   }
 
@@ -141,6 +186,7 @@ export function buildFrameExtractionPlan({
     actualFrames: timestamps.length,
     limitedByMaxFrames: false,
     stepSeconds,
+    framesPerSecond: null,
   };
 }
 
@@ -158,14 +204,25 @@ export function runVideoFrameTests() {
     mode: "interval",
     frameCount: 12,
     intervalSeconds: 2,
+    framesPerSecond: 1,
     startTime: 0.5,
     endTime: 4.6,
+  });
+  const fpsPlan = buildFrameExtractionPlan({
+    duration: 2,
+    mode: "fps",
+    frameCount: 12,
+    intervalSeconds: 1,
+    framesPerSecond: 2,
+    startTime: 0,
+    endTime: 1.6,
   });
   const clampedPlan = buildFrameExtractionPlan({
     duration: 7.2,
     mode: "count",
     frameCount: 3,
     intervalSeconds: 1,
+    framesPerSecond: 1,
     startTime: -4,
     endTime: 99,
   });
@@ -185,6 +242,11 @@ export function runVideoFrameTests() {
       name: "时间窗口夹紧",
       pass: clampedPlan.startTime === 0 && clampedPlan.endTime === 7.2,
       details: `${clampedPlan.startTime} - ${clampedPlan.endTime}`,
+    },
+    {
+      name: "按 FPS 抽帧",
+      pass: JSON.stringify(fpsPlan.timestamps) === JSON.stringify([0, 0.5, 1, 1.5]),
+      details: fpsPlan.timestamps.join(", "),
     },
   ];
 }
