@@ -416,6 +416,10 @@ function describeProcessConfig(config) {
     return "输出原始帧，不做透明处理。";
   }
 
+  if (!config.contractPx && !config.featherPx && !config.despeckle) {
+    return `输出透明 PNG，自动去底阈值 ${config.threshold}，不做额外精修。`;
+  }
+
   const parts = [
     `自动去底阈值 ${config.threshold}`,
     `边缘内收 ${config.contractPx}px`,
@@ -699,9 +703,9 @@ export default function VideoFrameToolPage({ homeHref }) {
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(0);
   const [threshold, setThreshold] = useState(42);
-  const [contractPx, setContractPx] = useState(1);
-  const [featherPx, setFeatherPx] = useState(1);
-  const [despeckle, setDespeckle] = useState(true);
+  const [contractPx, setContractPx] = useState(0);
+  const [featherPx, setFeatherPx] = useState(0);
+  const [despeckle, setDespeckle] = useState(false);
   const [cropMode, setCropMode] = useState(false);
   const [cropRect, setCropRect] = useState(null);
   const [extracting, setExtracting] = useState(false);
@@ -1348,7 +1352,7 @@ export default function VideoFrameToolPage({ homeHref }) {
               style={styles.fileInput}
             />
             <div style={styles.mutedTip}>
-              整个抽帧过程都在浏览器本地完成。当前最多一次生成 {MAX_EXTRACT_FRAMES} 张预览帧；如果开启透明输出，会对每一帧自动去底并做边缘精修。
+              整个抽帧过程都在浏览器本地完成。当前最多一次生成 {MAX_EXTRACT_FRAMES} 张预览帧；默认只做抽帧，只有在你切到透明输出并开启精修项时，才会额外处理边缘。
             </div>
           </div>
 
@@ -1482,7 +1486,7 @@ export default function VideoFrameToolPage({ homeHref }) {
                   disabled={!videoMeta || controlsDisabled}
                   style={styles.range}
                 />
-                <div style={styles.mutedTip}>当前仍然走轻量的边缘背景取样去底方式，适合背景较干净的人像、商品或已经有透明边缘的素材。</div>
+                <div style={styles.mutedTip}>当前仍然走轻量的边缘背景取样去底方式，适合背景较干净的人像、商品或已经有透明边缘的素材。默认不启用额外精修。</div>
               </div>
 
               <div style={styles.controlGrid}>
@@ -1500,7 +1504,7 @@ export default function VideoFrameToolPage({ homeHref }) {
                     disabled={!videoMeta || controlsDisabled}
                     style={styles.range}
                   />
-                  <div style={styles.mutedTip}>把选区边缘往里收一圈。`1px` 常用来压掉人物边缘的彩边和像素杂点。</div>
+                  <div style={styles.mutedTip}>默认关闭。把选区边缘往里收一圈时，`1px` 常用来压掉人物边缘的彩边和像素杂点。</div>
                 </div>
 
                 <div style={styles.numberCard}>
@@ -1517,7 +1521,7 @@ export default function VideoFrameToolPage({ homeHref }) {
                     disabled={!videoMeta || controlsDisabled}
                     style={styles.range}
                   />
-                  <div style={styles.mutedTip}>轻微羽化能缓和锯齿，但数值太大时边缘会发虚。</div>
+                  <div style={styles.mutedTip}>默认关闭。轻微羽化能缓和锯齿，但数值太大时边缘会发虚。</div>
                 </div>
               </div>
 
@@ -1532,7 +1536,7 @@ export default function VideoFrameToolPage({ homeHref }) {
                   />
                   <span>单像素去噪</span>
                 </label>
-                <div style={styles.mutedTip}>会清理孤立的前景像素点，并填掉单像素级别的小透明孔洞。</div>
+                <div style={styles.mutedTip}>默认关闭。开启后会清理孤立的前景像素点，并填掉单像素级别的小透明孔洞。</div>
               </div>
             </>
           ) : null}
