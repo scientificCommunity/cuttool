@@ -215,6 +215,9 @@ export function buildFrameSheetLayout({
     height: bestLayout.height,
     scale: Math.round(bestLayout.scale * 1000) / 1000,
     limited: bestLayout.limited,
+    capacity: bestLayout.capacity,
+    emptySlots: bestLayout.emptySlots,
+    insufficientCapacity: bestLayout.insufficientCapacity,
   };
 }
 
