@@ -22,6 +22,7 @@ import {
   MAX_FRAME_SHEET_PIXELS,
   MAX_FRAME_SHEET_SIDE,
   buildFrameExtractionPlan,
+  buildFramePlaybackPlan,
   buildFrameSheetLayout,
   createVideoFrameFileName,
   createVideoFrameSheetFileName,
@@ -157,6 +158,18 @@ const styles = {
     borderRadius: "10px",
     boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
   },
+  frameSelectButton: {
+    display: "block",
+    width: "100%",
+    padding: 0,
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+  },
+  frameCardActive: {
+    borderColor: "#38bdf8",
+    boxShadow: "0 0 0 1px rgba(56,189,248,0.28) inset",
+  },
   downloadButton: {
     width: "100%",
     padding: "10px 12px",
@@ -205,6 +218,52 @@ const styles = {
     border: "2px solid #38bdf8",
     boxShadow: "0 0 0 9999px rgba(2,6,23,0.36)",
     background: "rgba(56,189,248,0.12)",
+  },
+  playbackPanel: {
+    marginBottom: "14px",
+    padding: "14px",
+    borderRadius: "18px",
+    border: "1px solid #1e293b",
+    background: "rgba(2,6,23,0.72)",
+  },
+  playbackStage: {
+    minHeight: "220px",
+    display: "grid",
+    placeItems: "center",
+    padding: "14px",
+    borderRadius: "16px",
+    border: "1px solid #1e293b",
+    background: "#0f172a",
+  },
+  playbackImage: {
+    display: "block",
+    maxWidth: "100%",
+    maxHeight: "280px",
+    borderRadius: "12px",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
+  },
+  playbackToolbar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    flexWrap: "wrap",
+    marginBottom: "12px",
+  },
+  playbackButtonRow: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+  },
+  playbackButton: {
+    padding: "10px 12px",
+    borderRadius: "14px",
+    border: "1px solid #334155",
+    background: "#020617",
+    color: "#e2e8f0",
+    fontSize: "13px",
+    fontWeight: 700,
+    cursor: "pointer",
   },
 };
 
@@ -624,6 +683,7 @@ export default function VideoFrameToolPage({ homeHref }) {
   const outputCanvasRef = useRef(null);
   const scratchCanvasRef = useRef(null);
   const sheetCanvasRef = useRef(null);
+  const playbackTimerRef = useRef(null);
   const previewFramesRef = useRef([]);
   const videoUrlRef = useRef("");
   const cropDraftRef = useRef(null);
@@ -647,6 +707,8 @@ export default function VideoFrameToolPage({ homeHref }) {
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [downloadingOneId, setDownloadingOneId] = useState(null);
   const [mergeAllIntoSheet, setMergeAllIntoSheet] = useState(false);
+  const [previewFrameIndex, setPreviewFrameIndex] = useState(0);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
   const [frames, setFrames] = useState([]);
   const [status, setStatus] = useState("上传视频后，可以按张数、FPS 或时间间隔抽出关键帧，并导出 PNG。");
   const [testResults] = useState(() => [...runVideoFrameTests(), ...runMaskRefineTests()]);
@@ -775,8 +837,34 @@ export default function VideoFrameToolPage({ homeHref }) {
     return `当前会按 ${sheetLayout.columns} 列 × ${sheetLayout.rows} 行拼成一张 PNG。${limitText}`;
   }, [frames.length, mergeAllIntoSheet, sheetLayout]);
 
+  const playbackPlan = useMemo(
+    () => buildFramePlaybackPlan(frames.map((frame) => frame.time)),
+    [frames],
+  );
+
+  const activePreviewIndex = frames.length ? Math.min(previewFrameIndex, frames.length - 1) : 0;
+  const activePreviewFrame = frames[activePreviewIndex] || null;
+  const playbackSummary = useMemo(() => {
+    if (!frames.length) {
+      return "抽帧完成后，这里会把结果连起来播放预览。";
+    }
+
+    if (frames.length === 1 || !playbackPlan) {
+      return "当前只有 1 张预览帧，可以手动查看，但没有连续播放效果。";
+    }
+
+    return `预览会按抽帧时间间隔循环播放，当前约 ${playbackPlan.effectiveFps} fps。`;
+  }, [frames.length, playbackPlan]);
+
   useEffect(() => {
     previewFramesRef.current = frames;
+  }, [frames]);
+
+  useEffect(() => {
+    window.clearTimeout(playbackTimerRef.current);
+    playbackTimerRef.current = null;
+    setPreviewFrameIndex(0);
+    setPreviewPlaying(false);
   }, [frames]);
 
   useEffect(() => () => {
@@ -784,6 +872,7 @@ export default function VideoFrameToolPage({ homeHref }) {
     if (videoUrlRef.current) {
       URL.revokeObjectURL(videoUrlRef.current);
     }
+    window.clearTimeout(playbackTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -805,6 +894,25 @@ export default function VideoFrameToolPage({ homeHref }) {
       cancelled = true;
     };
   }, [videoMeta]);
+
+  useEffect(() => {
+    window.clearTimeout(playbackTimerRef.current);
+    playbackTimerRef.current = null;
+
+    if (!previewPlaying || frames.length <= 1 || !playbackPlan) {
+      return undefined;
+    }
+
+    const currentDelay = playbackPlan.frameDurationsMs[activePreviewIndex] || playbackPlan.averageDelayMs;
+    playbackTimerRef.current = window.setTimeout(() => {
+      setPreviewFrameIndex((currentIndex) => (currentIndex >= frames.length - 1 ? 0 : currentIndex + 1));
+    }, currentDelay);
+
+    return () => {
+      window.clearTimeout(playbackTimerRef.current);
+      playbackTimerRef.current = null;
+    };
+  }, [activePreviewIndex, frames.length, playbackPlan, previewPlaying]);
 
   const controlsDisabled = extracting || downloadingAll || Boolean(downloadingOneId);
 
@@ -1158,6 +1266,24 @@ export default function VideoFrameToolPage({ homeHref }) {
     } finally {
       setDownloadingAll(false);
     }
+  };
+
+  const handleSelectPreviewFrame = (index) => {
+    setPreviewPlaying(false);
+    setPreviewFrameIndex(index);
+  };
+
+  const togglePreviewPlayback = () => {
+    if (frames.length <= 1) {
+      return;
+    }
+
+    setPreviewPlaying((value) => !value);
+  };
+
+  const resetPreviewPlayback = () => {
+    setPreviewPlaying(false);
+    setPreviewFrameIndex(0);
   };
 
   const resultPreviewUsesTransparency = frames[0]?.processConfig?.outputMode === "transparent";
@@ -1517,11 +1643,70 @@ export default function VideoFrameToolPage({ homeHref }) {
               : "尚未生成"}
           </div>
         </div>
+        <div style={styles.playbackPanel}>
+          <div style={styles.playbackToolbar}>
+            <div>
+              <div style={styles.frameTitle}>播放预览</div>
+              <div style={styles.frameMeta}>
+                {activePreviewFrame
+                  ? `当前第 ${activePreviewFrame.index} 张 · ${activePreviewFrame.label}`
+                  : "等待抽帧结果"}
+              </div>
+            </div>
+            <div style={styles.playbackButtonRow}>
+              <button
+                onClick={togglePreviewPlayback}
+                disabled={frames.length <= 1 || controlsDisabled}
+                style={{
+                  ...styles.playbackButton,
+                  ...(frames.length <= 1 || controlsDisabled ? styles.buttonDisabled : null),
+                }}
+              >
+                {previewPlaying ? "暂停预览" : "播放预览"}
+              </button>
+              <button
+                onClick={resetPreviewPlayback}
+                disabled={!frames.length || controlsDisabled}
+                style={{
+                  ...styles.playbackButton,
+                  ...(!frames.length || controlsDisabled ? styles.buttonDisabled : null),
+                }}
+              >
+                回到首帧
+              </button>
+            </div>
+          </div>
+          <div
+            style={{
+              ...styles.playbackStage,
+              ...(activePreviewFrame?.processConfig?.outputMode === "transparent" ? checkerboard : null),
+            }}
+          >
+            {activePreviewFrame ? (
+              <img
+                src={activePreviewFrame.previewUrl}
+                alt={`preview-frame-${activePreviewFrame.index}`}
+                style={styles.playbackImage}
+              />
+            ) : (
+              <div style={{ ...styles.placeholder, minHeight: "220px", width: "100%" }}>
+                抽帧完成后，这里会按抽帧时的时间步长播放预览。
+              </div>
+            )}
+          </div>
+          <div style={styles.mutedTip}>{playbackSummary}</div>
+        </div>
         <div style={styles.frameScroller}>
           {frames.length ? (
             <div style={styles.frameGrid}>
-              {frames.map((frame) => (
-                <div key={frame.id} style={styles.frameCard}>
+              {frames.map((frame, index) => (
+                <div
+                  key={frame.id}
+                  style={{
+                    ...styles.frameCard,
+                    ...(activePreviewIndex === index ? styles.frameCardActive : null),
+                  }}
+                >
                   <div style={styles.frameHead}>
                     <div>
                       <div style={styles.frameTitle}>{frame.label}</div>
@@ -1531,14 +1716,20 @@ export default function VideoFrameToolPage({ homeHref }) {
                     </div>
                     <div style={styles.smallMuted}>PNG</div>
                   </div>
-                  <div
-                    style={{
-                      ...styles.frameThumbWrap,
-                      ...(frame.processConfig?.outputMode === "transparent" ? checkerboard : null),
-                    }}
+                  <button
+                    type="button"
+                    onClick={() => handleSelectPreviewFrame(index)}
+                    style={styles.frameSelectButton}
                   >
-                    <img src={frame.previewUrl} alt={`frame-${frame.index}`} style={styles.frameThumb} />
-                  </div>
+                    <div
+                      style={{
+                        ...styles.frameThumbWrap,
+                        ...(frame.processConfig?.outputMode === "transparent" ? checkerboard : null),
+                      }}
+                    >
+                      <img src={frame.previewUrl} alt={`frame-${frame.index}`} style={styles.frameThumb} />
+                    </div>
+                  </button>
                   <button
                     onClick={() => downloadFrame(frame)}
                     disabled={controlsDisabled}

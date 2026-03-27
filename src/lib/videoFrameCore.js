@@ -70,6 +70,49 @@ export function createVideoFrameSheetFileName(fileName, frameCount, startTime, e
   return `${stem}-frames-${String(frameCount).padStart(3, "0")}-${startLabel}-to-${endLabel}.png`;
 }
 
+export function buildFramePlaybackPlan(
+  timestamps,
+  { minDelayMs = 40, maxDelayMs = 3000, fallbackFps = 2 } = {},
+) {
+  const safeTimestamps = Array.isArray(timestamps)
+    ? timestamps.filter((value) => Number.isFinite(value) && value >= 0)
+    : [];
+  const safeFallbackDelay = Math.max(minDelayMs, Math.min(maxDelayMs, Math.round(1000 / fallbackFps)));
+
+  if (!safeTimestamps.length) {
+    return null;
+  }
+
+  if (safeTimestamps.length === 1) {
+    return {
+      frameDurationsMs: [safeFallbackDelay],
+      averageDelayMs: safeFallbackDelay,
+      effectiveFps: Math.round((1000 / safeFallbackDelay) * 100) / 100,
+    };
+  }
+
+  const frameDurationsMs = [];
+  let totalDelayMs = 0;
+
+  for (let index = 0; index < safeTimestamps.length - 1; index += 1) {
+    const rawDelayMs = Math.round((safeTimestamps[index + 1] - safeTimestamps[index]) * 1000);
+    const safeDelayMs = clamp(rawDelayMs, minDelayMs, maxDelayMs);
+    frameDurationsMs.push(safeDelayMs);
+    totalDelayMs += safeDelayMs;
+  }
+
+  const tailDelayMs = frameDurationsMs[frameDurationsMs.length - 1] || safeFallbackDelay;
+  frameDurationsMs.push(tailDelayMs);
+
+  const averageDelayMs = Math.round(totalDelayMs / (safeTimestamps.length - 1));
+
+  return {
+    frameDurationsMs,
+    averageDelayMs,
+    effectiveFps: Math.round((1000 / averageDelayMs) * 100) / 100,
+  };
+}
+
 export function buildFrameSheetLayout({
   frameCount,
   frameWidth,
@@ -308,6 +351,7 @@ export function runVideoFrameTests() {
     frameWidth: 1920,
     frameHeight: 1080,
   });
+  const playbackPlan = buildFramePlaybackPlan([0, 0.5, 1, 1.5]);
 
   return [
     {
@@ -338,6 +382,14 @@ export function runVideoFrameTests() {
         sheetLayout.height <= MAX_FRAME_SHEET_SIDE &&
         sheetLayout.columns * sheetLayout.rows >= 10,
       details: sheetLayout ? `${sheetLayout.columns}x${sheetLayout.rows} @ ${sheetLayout.width}x${sheetLayout.height}` : "null",
+    },
+    {
+      name: "播放预览间隔",
+      pass:
+        Boolean(playbackPlan) &&
+        JSON.stringify(playbackPlan.frameDurationsMs) === JSON.stringify([500, 500, 500, 500]) &&
+        playbackPlan.effectiveFps === 2,
+      details: playbackPlan ? `${playbackPlan.frameDurationsMs.join(", ")} @ ${playbackPlan.effectiveFps} fps` : "null",
     },
   ];
 }
