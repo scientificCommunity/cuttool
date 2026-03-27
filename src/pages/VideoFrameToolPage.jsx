@@ -19,8 +19,12 @@ import {
 } from "../lib/maskRefineCore.js";
 import {
   MAX_EXTRACT_FRAMES,
+  MAX_FRAME_SHEET_PIXELS,
+  MAX_FRAME_SHEET_SIDE,
   buildFrameExtractionPlan,
+  buildFrameSheetLayout,
   createVideoFrameFileName,
+  createVideoFrameSheetFileName,
   formatDurationLabel,
   normalizeFrameCount,
   normalizeFramesPerSecond,
@@ -430,6 +434,17 @@ function getOverlayCropStyle(rect, sourceWidth, sourceHeight) {
   };
 }
 
+function getFrameExportSize(frame, videoMeta) {
+  if (!videoMeta) {
+    return { width: 0, height: 0 };
+  }
+
+  return {
+    width: frame?.cropRect?.width || videoMeta.width,
+    height: frame?.cropRect?.height || videoMeta.height,
+  };
+}
+
 async function estimateVideoFrameRate(videoUrl) {
   if (typeof document === "undefined" || !videoUrl) {
     return null;
@@ -608,6 +623,7 @@ export default function VideoFrameToolPage({ homeHref }) {
   const captureCanvasRef = useRef(null);
   const outputCanvasRef = useRef(null);
   const scratchCanvasRef = useRef(null);
+  const sheetCanvasRef = useRef(null);
   const previewFramesRef = useRef([]);
   const videoUrlRef = useRef("");
   const cropDraftRef = useRef(null);
@@ -630,8 +646,9 @@ export default function VideoFrameToolPage({ homeHref }) {
   const [extracting, setExtracting] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [downloadingOneId, setDownloadingOneId] = useState(null);
+  const [mergeAllIntoSheet, setMergeAllIntoSheet] = useState(false);
   const [frames, setFrames] = useState([]);
-  const [status, setStatus] = useState("上传视频后，可以按张数或时间间隔抽出关键帧，并导出 PNG。");
+  const [status, setStatus] = useState("上传视频后，可以按张数、FPS 或时间间隔抽出关键帧，并导出 PNG。");
   const [testResults] = useState(() => [...runVideoFrameTests(), ...runMaskRefineTests()]);
   const checkerboard = useMemo(() => checkerboardStyle(), []);
 
@@ -722,6 +739,41 @@ export default function VideoFrameToolPage({ homeHref }) {
 
     return !sameCropRect(cropRect, extractedCropRect);
   }, [cropRect, extractedCropRect, frames.length]);
+
+  const sheetLayout = useMemo(() => {
+    if (!videoMeta || !frames.length) {
+      return null;
+    }
+
+    const maxFrameWidth = Math.max(...frames.map((frame) => getFrameExportSize(frame, videoMeta).width));
+    const maxFrameHeight = Math.max(...frames.map((frame) => getFrameExportSize(frame, videoMeta).height));
+
+    return buildFrameSheetLayout({
+      frameCount: frames.length,
+      frameWidth: maxFrameWidth,
+      frameHeight: maxFrameHeight,
+    });
+  }, [frames, videoMeta]);
+
+  const exportModeSummary = useMemo(() => {
+    if (!frames.length) {
+      return "默认逐张导出全部 PNG；勾选后可把全部结果拼成一张大图导出。";
+    }
+
+    if (!mergeAllIntoSheet) {
+      return `当前会逐张导出 ${frames.length} 张 PNG。`;
+    }
+
+    if (!sheetLayout) {
+      return "当前会把全部结果拼成一张 PNG 导出。";
+    }
+
+    const limitText = sheetLayout.limited
+      ? ` 为了避免大图超过浏览器画布限制，会自动缩放到 ${sheetLayout.width} × ${sheetLayout.height}。`
+      : ` 合并后尺寸约 ${sheetLayout.width} × ${sheetLayout.height}。`;
+
+    return `当前会按 ${sheetLayout.columns} 列 × ${sheetLayout.rows} 行拼成一张 PNG。${limitText}`;
+  }, [frames.length, mergeAllIntoSheet, sheetLayout]);
 
   useEffect(() => {
     previewFramesRef.current = frames;
@@ -844,6 +896,14 @@ export default function VideoFrameToolPage({ homeHref }) {
     }
 
     return outputCanvasRef.current;
+  };
+
+  const ensureSheetCanvas = () => {
+    if (!sheetCanvasRef.current) {
+      sheetCanvasRef.current = document.createElement("canvas");
+    }
+
+    return sheetCanvasRef.current;
   };
 
   const getCropPointFromEvent = (event) => {
@@ -1017,9 +1077,72 @@ export default function VideoFrameToolPage({ homeHref }) {
     }
 
     setDownloadingAll(true);
-    setStatus(`准备导出 ${frames.length} 张 PNG。浏览器可能会请求批量下载权限。`);
+    setStatus(
+      mergeAllIntoSheet
+        ? `准备把 ${frames.length} 张结果合并成一张 PNG。`
+        : `准备导出 ${frames.length} 张 PNG。浏览器可能会请求批量下载权限。`,
+    );
 
     try {
+      if (mergeAllIntoSheet) {
+        const layout = sheetLayout;
+        if (!layout) {
+          throw new Error("合并导出布局生成失败");
+        }
+
+        const outputCanvas = ensureOutputCanvas();
+        const sheetCanvas = ensureSheetCanvas();
+        sheetCanvas.width = layout.width;
+        sheetCanvas.height = layout.height;
+
+        const sheetCtx = sheetCanvas.getContext("2d", { willReadFrequently: true });
+        if (!sheetCtx) {
+          throw new Error("无法获取合并画布");
+        }
+
+        sheetCtx.clearRect(0, 0, sheetCanvas.width, sheetCanvas.height);
+        sheetCtx.imageSmoothingEnabled = true;
+        sheetCtx.imageSmoothingQuality = "high";
+
+        for (let index = 0; index < frames.length; index += 1) {
+          const frame = frames[index];
+          setStatus(`正在合并第 ${index + 1} / ${frames.length} 张：${frame.label}`);
+          await buildFrameOutputAtTime(frame.time, frame.processConfig || currentProcessConfig, {
+            crop: frame.cropRect || null,
+          });
+
+          const column = index % layout.columns;
+          const row = Math.floor(index / layout.columns);
+          const slotX = column * layout.cellWidth;
+          const slotY = row * layout.cellHeight;
+          const drawScale = Math.min(layout.cellWidth / outputCanvas.width, layout.cellHeight / outputCanvas.height);
+          const drawWidth = Math.max(1, Math.round(outputCanvas.width * drawScale));
+          const drawHeight = Math.max(1, Math.round(outputCanvas.height * drawScale));
+          const drawX = slotX + Math.floor((layout.cellWidth - drawWidth) / 2);
+          const drawY = slotY + Math.floor((layout.cellHeight - drawHeight) / 2);
+
+          sheetCtx.drawImage(outputCanvas, 0, 0, outputCanvas.width, outputCanvas.height, drawX, drawY, drawWidth, drawHeight);
+        }
+
+        const blob = await canvasToBlob(sheetCanvas);
+        triggerBlobDownload(
+          blob,
+          createVideoFrameSheetFileName(
+            videoMeta.name,
+            frames.length,
+            frames[0]?.time ?? 0,
+            frames[frames.length - 1]?.time ?? frames[0]?.time ?? 0,
+          ),
+        );
+
+        setStatus(
+          sheetLayout?.limited
+            ? `已导出合并 PNG。为了避免画布超限，输出尺寸自动压到 ${layout.width} × ${layout.height}。`
+            : `已导出合并 PNG，尺寸 ${layout.width} × ${layout.height}。`,
+        );
+        return;
+      }
+
       for (const frame of frames) {
         const { blob } = await buildFrameOutputAtTime(frame.time, frame.processConfig || currentProcessConfig, {
           crop: frame.cropRect || null,
@@ -1045,7 +1168,7 @@ export default function VideoFrameToolPage({ homeHref }) {
       homeHref={homeHref}
       topHint="当前工具：视频帧提取"
       title="视频帧提取"
-      subtitle="把本地视频按时间窗口抽成一组静态帧。支持按总张数均匀抽帧，也支持按时间间隔连续抽帧，导出为 PNG。"
+      subtitle="把本地视频按时间窗口抽成一组静态帧。支持按总张数、按 FPS、按时间间隔抽帧，也支持逐张导出或合并成一张 PNG。"
       metaText={metaText}
       shellMaxWidth="1500px"
       layoutColumns="360px minmax(0, 1fr)"
@@ -1287,6 +1410,22 @@ export default function VideoFrameToolPage({ homeHref }) {
             </div>
           </div>
 
+          <div style={styles.toggleCard}>
+            <label style={styles.checkboxRow}>
+              <input
+                type="checkbox"
+                checked={mergeAllIntoSheet}
+                onChange={(event) => setMergeAllIntoSheet(event.target.checked)}
+                disabled={!frames.length || controlsDisabled}
+                style={styles.checkbox}
+              />
+              <span>全部结果合并成一张图片</span>
+            </label>
+            <div style={styles.mutedTip}>
+              不勾选时，“导出全部 PNG”会逐张下载所有结果；勾选后会按时间顺序拼成一张大图导出。
+            </div>
+          </div>
+
           <div style={styles.buttonGrid}>
             <button
               onClick={extractFrames}
@@ -1306,7 +1445,7 @@ export default function VideoFrameToolPage({ homeHref }) {
                 ...(!frames.length || controlsDisabled ? styles.buttonDisabled : null),
               }}
             >
-              {downloadingAll ? "导出中..." : "导出全部 PNG"}
+              {downloadingAll ? "导出中..." : mergeAllIntoSheet ? "导出合并 PNG" : "导出全部 PNG"}
             </button>
           </div>
 
@@ -1314,6 +1453,7 @@ export default function VideoFrameToolPage({ homeHref }) {
           <StatusCard title="抽帧方案" body={planSummary} />
           <StatusCard title="裁切区域" body={cropSummary} />
           <StatusCard title="当前输出" body={processSummary} />
+          <StatusCard title="导出方式" body={exportModeSummary} />
           {processSettingsDirty || cropSettingsDirty ? (
             <StatusCard
               title="参数变更提醒"
@@ -1419,6 +1559,9 @@ export default function VideoFrameToolPage({ homeHref }) {
         <div style={styles.mutedTip}>
           预览使用缩略图减轻内存占用；实际下载时会重新按原视频分辨率抓取 PNG。
           {resultPreviewUsesTransparency ? " 透明模式下，导出会按同一组去底与精修参数重新处理整帧。" : ""}
+          {mergeAllIntoSheet
+            ? ` 勾选合并导出时，会按时间顺序拼成一张大图；如果总尺寸超过浏览器可承受范围，会自动缩小到不超过 ${MAX_FRAME_SHEET_SIDE}px 边长和 ${MAX_FRAME_SHEET_PIXELS.toLocaleString()} 像素。`
+            : ""}
         </div>
       </div>
     </ImageToolWorkspace>

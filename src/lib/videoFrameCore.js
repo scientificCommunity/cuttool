@@ -1,4 +1,6 @@
 export const MAX_EXTRACT_FRAMES = 120;
+export const MAX_FRAME_SHEET_SIDE = 8192;
+export const MAX_FRAME_SHEET_PIXELS = 33554432;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -59,6 +61,81 @@ export function createVideoFrameFileName(fileName, index, time) {
   const stem = (fileName || "video-frame").replace(/\.[^.]+$/, "");
   const safeLabel = formatDurationLabel(time).replace(/[:.]/g, "-");
   return `${stem}-frame-${String(index).padStart(3, "0")}-${safeLabel}.png`;
+}
+
+export function createVideoFrameSheetFileName(fileName, frameCount, startTime, endTime) {
+  const stem = (fileName || "video-frame").replace(/\.[^.]+$/, "");
+  const startLabel = formatDurationLabel(startTime).replace(/[:.]/g, "-");
+  const endLabel = formatDurationLabel(endTime).replace(/[:.]/g, "-");
+  return `${stem}-frames-${String(frameCount).padStart(3, "0")}-${startLabel}-to-${endLabel}.png`;
+}
+
+export function buildFrameSheetLayout({
+  frameCount,
+  frameWidth,
+  frameHeight,
+  maxSide = MAX_FRAME_SHEET_SIDE,
+  maxPixels = MAX_FRAME_SHEET_PIXELS,
+}) {
+  const safeCount = Math.max(0, Math.round(Number(frameCount) || 0));
+  const safeWidth = Math.max(0, Math.round(Number(frameWidth) || 0));
+  const safeHeight = Math.max(0, Math.round(Number(frameHeight) || 0));
+
+  if (!safeCount || !safeWidth || !safeHeight) {
+    return null;
+  }
+
+  let bestLayout = null;
+
+  for (let columns = 1; columns <= safeCount; columns += 1) {
+    const rows = Math.ceil(safeCount / columns);
+    const rawWidth = columns * safeWidth;
+    const rawHeight = rows * safeHeight;
+    const rawPixels = rawWidth * rawHeight;
+    const sideScale = Math.min(
+      1,
+      maxSide > 0 ? maxSide / rawWidth : 1,
+      maxSide > 0 ? maxSide / rawHeight : 1,
+    );
+    const pixelScale = Math.min(1, maxPixels > 0 ? Math.sqrt(maxPixels / rawPixels) : 1);
+    const scale = Math.max(0, Math.min(sideScale, pixelScale));
+    const cellWidth = Math.max(1, Math.floor(safeWidth * scale));
+    const cellHeight = Math.max(1, Math.floor(safeHeight * scale));
+    const sheetWidth = cellWidth * columns;
+    const sheetHeight = cellHeight * rows;
+    const occupancy = safeCount / (columns * rows);
+    const balance = Math.min(sheetWidth, sheetHeight) / Math.max(sheetWidth, sheetHeight);
+    const score = scale * 1000 + occupancy * 10 + balance;
+
+    if (!bestLayout || score > bestLayout.score) {
+      bestLayout = {
+        columns,
+        rows,
+        cellWidth,
+        cellHeight,
+        width: sheetWidth,
+        height: sheetHeight,
+        scale,
+        limited: scale < 0.999,
+        score,
+      };
+    }
+  }
+
+  if (!bestLayout) {
+    return null;
+  }
+
+  return {
+    columns: bestLayout.columns,
+    rows: bestLayout.rows,
+    cellWidth: bestLayout.cellWidth,
+    cellHeight: bestLayout.cellHeight,
+    width: bestLayout.width,
+    height: bestLayout.height,
+    scale: Math.round(bestLayout.scale * 1000) / 1000,
+    limited: bestLayout.limited,
+  };
 }
 
 export function buildFrameExtractionPlan({
@@ -226,6 +303,11 @@ export function runVideoFrameTests() {
     startTime: -4,
     endTime: 99,
   });
+  const sheetLayout = buildFrameSheetLayout({
+    frameCount: 10,
+    frameWidth: 1920,
+    frameHeight: 1080,
+  });
 
   return [
     {
@@ -247,6 +329,15 @@ export function runVideoFrameTests() {
       name: "按 FPS 抽帧",
       pass: JSON.stringify(fpsPlan.timestamps) === JSON.stringify([0, 0.5, 1, 1.5]),
       details: fpsPlan.timestamps.join(", "),
+    },
+    {
+      name: "合并图布局限制",
+      pass:
+        Boolean(sheetLayout) &&
+        sheetLayout.width <= MAX_FRAME_SHEET_SIDE &&
+        sheetLayout.height <= MAX_FRAME_SHEET_SIDE &&
+        sheetLayout.columns * sheetLayout.rows >= 10,
+      details: sheetLayout ? `${sheetLayout.columns}x${sheetLayout.rows} @ ${sheetLayout.width}x${sheetLayout.height}` : "null",
     },
   ];
 }
