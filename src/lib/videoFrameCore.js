@@ -23,6 +23,15 @@ export function normalizeFrameCount(value, { min = 1, max = MAX_EXTRACT_FRAMES, 
   return clamp(Math.round(numeric), min, max);
 }
 
+export function normalizeSheetGridCount(value, { min = 1, max = MAX_EXTRACT_FRAMES, fallback = 1 } = {}) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  return clamp(Math.round(numeric), min, max);
+}
+
 export function normalizeIntervalSeconds(value, { min = 0.1, max = 60, fallback = 1 } = {}) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -117,23 +126,24 @@ export function buildFrameSheetLayout({
   frameCount,
   frameWidth,
   frameHeight,
+  rows = null,
+  columns = null,
   maxSide = MAX_FRAME_SHEET_SIDE,
   maxPixels = MAX_FRAME_SHEET_PIXELS,
 }) {
   const safeCount = Math.max(0, Math.round(Number(frameCount) || 0));
   const safeWidth = Math.max(0, Math.round(Number(frameWidth) || 0));
   const safeHeight = Math.max(0, Math.round(Number(frameHeight) || 0));
+  const safeRows = Number.isFinite(rows) && rows > 0 ? Math.max(1, Math.round(rows)) : null;
+  const safeColumns = Number.isFinite(columns) && columns > 0 ? Math.max(1, Math.round(columns)) : null;
 
   if (!safeCount || !safeWidth || !safeHeight) {
     return null;
   }
 
-  let bestLayout = null;
-
-  for (let columns = 1; columns <= safeCount; columns += 1) {
-    const rows = Math.ceil(safeCount / columns);
-    const rawWidth = columns * safeWidth;
-    const rawHeight = rows * safeHeight;
+  const createLayout = (nextColumns, nextRows, { insufficientCapacity = false } = {}) => {
+    const rawWidth = nextColumns * safeWidth;
+    const rawHeight = nextRows * safeHeight;
     const rawPixels = rawWidth * rawHeight;
     const sideScale = Math.min(
       1,
@@ -144,22 +154,49 @@ export function buildFrameSheetLayout({
     const scale = Math.max(0, Math.min(sideScale, pixelScale));
     const cellWidth = Math.max(1, Math.floor(safeWidth * scale));
     const cellHeight = Math.max(1, Math.floor(safeHeight * scale));
-    const sheetWidth = cellWidth * columns;
-    const sheetHeight = cellHeight * rows;
-    const occupancy = safeCount / (columns * rows);
-    const balance = Math.min(sheetWidth, sheetHeight) / Math.max(sheetWidth, sheetHeight);
-    const score = scale * 1000 + occupancy * 10 + balance;
+    const capacity = nextColumns * nextRows;
+
+    return {
+      columns: nextColumns,
+      rows: nextRows,
+      cellWidth,
+      cellHeight,
+      width: cellWidth * nextColumns,
+      height: cellHeight * nextRows,
+      scale: Math.round(scale * 1000) / 1000,
+      limited: scale < 0.999,
+      capacity,
+      emptySlots: Math.max(0, capacity - safeCount),
+      insufficientCapacity,
+    };
+  };
+
+  if (safeRows && safeColumns) {
+    return createLayout(safeColumns, safeRows, {
+      insufficientCapacity: safeRows * safeColumns < safeCount,
+    });
+  }
+
+  if (safeColumns) {
+    return createLayout(safeColumns, Math.ceil(safeCount / safeColumns));
+  }
+
+  if (safeRows) {
+    return createLayout(Math.ceil(safeCount / safeRows), safeRows);
+  }
+
+  let bestLayout = null;
+
+  for (let columns = 1; columns <= safeCount; columns += 1) {
+    const rows = Math.ceil(safeCount / columns);
+    const layout = createLayout(columns, rows);
+    const occupancy = safeCount / layout.capacity;
+    const balance = Math.min(layout.width, layout.height) / Math.max(layout.width, layout.height);
+    const score = layout.scale * 1000 + occupancy * 10 + balance;
 
     if (!bestLayout || score > bestLayout.score) {
       bestLayout = {
-        columns,
-        rows,
-        cellWidth,
-        cellHeight,
-        width: sheetWidth,
-        height: sheetHeight,
-        scale,
-        limited: scale < 0.999,
+        ...layout,
         score,
       };
     }
@@ -351,6 +388,13 @@ export function runVideoFrameTests() {
     frameWidth: 1920,
     frameHeight: 1080,
   });
+  const manualSheetLayout = buildFrameSheetLayout({
+    frameCount: 10,
+    frameWidth: 800,
+    frameHeight: 450,
+    rows: 2,
+    columns: 4,
+  });
   const playbackPlan = buildFramePlaybackPlan([0, 0.5, 1, 1.5]);
 
   return [
@@ -380,8 +424,20 @@ export function runVideoFrameTests() {
         Boolean(sheetLayout) &&
         sheetLayout.width <= MAX_FRAME_SHEET_SIDE &&
         sheetLayout.height <= MAX_FRAME_SHEET_SIDE &&
-        sheetLayout.columns * sheetLayout.rows >= 10,
+        sheetLayout.capacity >= 10,
       details: sheetLayout ? `${sheetLayout.columns}x${sheetLayout.rows} @ ${sheetLayout.width}x${sheetLayout.height}` : "null",
+    },
+    {
+      name: "合并图手动行列",
+      pass:
+        Boolean(manualSheetLayout) &&
+        manualSheetLayout.rows === 2 &&
+        manualSheetLayout.columns === 4 &&
+        manualSheetLayout.insufficientCapacity &&
+        manualSheetLayout.capacity === 8,
+      details: manualSheetLayout
+        ? `${manualSheetLayout.columns}x${manualSheetLayout.rows} capacity ${manualSheetLayout.capacity}`
+        : "null",
     },
     {
       name: "播放预览间隔",

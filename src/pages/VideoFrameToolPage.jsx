@@ -30,6 +30,7 @@ import {
   normalizeFrameCount,
   normalizeFramesPerSecond,
   normalizeIntervalSeconds,
+  normalizeSheetGridCount,
   runVideoFrameTests,
 } from "../lib/videoFrameCore.js";
 
@@ -707,6 +708,8 @@ export default function VideoFrameToolPage({ homeHref }) {
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [downloadingOneId, setDownloadingOneId] = useState(null);
   const [mergeAllIntoSheet, setMergeAllIntoSheet] = useState(false);
+  const [sheetRows, setSheetRows] = useState(1);
+  const [sheetColumns, setSheetColumns] = useState(1);
   const [previewFrameIndex, setPreviewFrameIndex] = useState(0);
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [frames, setFrames] = useState([]);
@@ -802,7 +805,7 @@ export default function VideoFrameToolPage({ homeHref }) {
     return !sameCropRect(cropRect, extractedCropRect);
   }, [cropRect, extractedCropRect, frames.length]);
 
-  const sheetLayout = useMemo(() => {
+  const autoSheetLayout = useMemo(() => {
     if (!videoMeta || !frames.length) {
       return null;
     }
@@ -817,6 +820,23 @@ export default function VideoFrameToolPage({ homeHref }) {
     });
   }, [frames, videoMeta]);
 
+  const sheetLayout = useMemo(() => {
+    if (!videoMeta || !frames.length) {
+      return null;
+    }
+
+    const maxFrameWidth = Math.max(...frames.map((frame) => getFrameExportSize(frame, videoMeta).width));
+    const maxFrameHeight = Math.max(...frames.map((frame) => getFrameExportSize(frame, videoMeta).height));
+
+    return buildFrameSheetLayout({
+      frameCount: frames.length,
+      frameWidth: maxFrameWidth,
+      frameHeight: maxFrameHeight,
+      rows: sheetRows,
+      columns: sheetColumns,
+    });
+  }, [frames, sheetColumns, sheetRows, videoMeta]);
+
   const exportModeSummary = useMemo(() => {
     if (!frames.length) {
       return "默认逐张导出全部 PNG；勾选后可把全部结果拼成一张大图导出。";
@@ -830,11 +850,16 @@ export default function VideoFrameToolPage({ homeHref }) {
       return "当前会把全部结果拼成一张 PNG 导出。";
     }
 
+    if (sheetLayout.insufficientCapacity) {
+      return `当前设置为 ${sheetLayout.columns} 列 × ${sheetLayout.rows} 行，只能容纳 ${sheetLayout.capacity} 张，少于当前 ${frames.length} 张结果。请调大行数或列数。`;
+    }
+
     const limitText = sheetLayout.limited
       ? ` 为了避免大图超过浏览器画布限制，会自动缩放到 ${sheetLayout.width} × ${sheetLayout.height}。`
       : ` 合并后尺寸约 ${sheetLayout.width} × ${sheetLayout.height}。`;
+    const emptyText = sheetLayout.emptySlots ? ` 会保留 ${sheetLayout.emptySlots} 个空白格。` : "";
 
-    return `当前会按 ${sheetLayout.columns} 列 × ${sheetLayout.rows} 行拼成一张 PNG。${limitText}`;
+    return `当前会按 ${sheetLayout.columns} 列 × ${sheetLayout.rows} 行拼成一张 PNG。${limitText}${emptyText}`;
   }, [frames.length, mergeAllIntoSheet, sheetLayout]);
 
   const playbackPlan = useMemo(
@@ -859,6 +884,17 @@ export default function VideoFrameToolPage({ homeHref }) {
   useEffect(() => {
     previewFramesRef.current = frames;
   }, [frames]);
+
+  useEffect(() => {
+    if (autoSheetLayout) {
+      setSheetRows(autoSheetLayout.rows);
+      setSheetColumns(autoSheetLayout.columns);
+      return;
+    }
+
+    setSheetRows(1);
+    setSheetColumns(1);
+  }, [autoSheetLayout, frames.length]);
 
   useEffect(() => {
     window.clearTimeout(playbackTimerRef.current);
@@ -915,6 +951,7 @@ export default function VideoFrameToolPage({ homeHref }) {
   }, [activePreviewIndex, frames.length, playbackPlan, previewPlaying]);
 
   const controlsDisabled = extracting || downloadingAll || Boolean(downloadingOneId);
+  const mergeExportBlocked = mergeAllIntoSheet && Boolean(sheetLayout?.insufficientCapacity);
 
   const setPreviewFrames = (nextFrames) => {
     revokePreviewUrls(previewFramesRef.current);
@@ -1187,14 +1224,14 @@ export default function VideoFrameToolPage({ homeHref }) {
     setDownloadingAll(true);
     setStatus(
       mergeAllIntoSheet
-        ? `准备把 ${frames.length} 张结果合并成一张 PNG。`
+        ? `准备按 ${sheetColumns} 列 × ${sheetRows} 行把 ${frames.length} 张结果合并成一张 PNG。`
         : `准备导出 ${frames.length} 张 PNG。浏览器可能会请求批量下载权限。`,
     );
 
     try {
       if (mergeAllIntoSheet) {
         const layout = sheetLayout;
-        if (!layout) {
+        if (!layout || layout.insufficientCapacity) {
           throw new Error("合并导出布局生成失败");
         }
 
@@ -1244,7 +1281,7 @@ export default function VideoFrameToolPage({ homeHref }) {
         );
 
         setStatus(
-          sheetLayout?.limited
+          layout.limited
             ? `已导出合并 PNG。为了避免画布超限，输出尺寸自动压到 ${layout.width} × ${layout.height}。`
             : `已导出合并 PNG，尺寸 ${layout.width} × ${layout.height}。`,
         );
@@ -1550,6 +1587,40 @@ export default function VideoFrameToolPage({ homeHref }) {
             <div style={styles.mutedTip}>
               不勾选时，“导出全部 PNG”会逐张下载所有结果；勾选后会按时间顺序拼成一张大图导出。
             </div>
+            {mergeAllIntoSheet ? (
+              <div style={{ ...styles.controlGrid, marginTop: "12px" }}>
+                <div style={styles.numberCard}>
+                  <div style={styles.rowBetween}>
+                    <span style={styles.labelInline}>合并行数</span>
+                    <span style={styles.value}>{sheetRows} 行</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    max={MAX_EXTRACT_FRAMES}
+                    value={sheetRows}
+                    onChange={(event) => setSheetRows(normalizeSheetGridCount(event.target.value))}
+                    disabled={!frames.length || controlsDisabled}
+                    style={styles.numberInput}
+                  />
+                </div>
+                <div style={styles.numberCard}>
+                  <div style={styles.rowBetween}>
+                    <span style={styles.labelInline}>合并列数</span>
+                    <span style={styles.value}>{sheetColumns} 列</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    max={MAX_EXTRACT_FRAMES}
+                    value={sheetColumns}
+                    onChange={(event) => setSheetColumns(normalizeSheetGridCount(event.target.value))}
+                    disabled={!frames.length || controlsDisabled}
+                    style={styles.numberInput}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div style={styles.buttonGrid}>
@@ -1565,10 +1636,10 @@ export default function VideoFrameToolPage({ homeHref }) {
             </button>
             <button
               onClick={downloadAllFrames}
-              disabled={!frames.length || controlsDisabled}
+              disabled={!frames.length || controlsDisabled || mergeExportBlocked}
               style={{
                 ...styles.infoButton,
-                ...(!frames.length || controlsDisabled ? styles.buttonDisabled : null),
+                ...(!frames.length || controlsDisabled || mergeExportBlocked ? styles.buttonDisabled : null),
               }}
             >
               {downloadingAll ? "导出中..." : mergeAllIntoSheet ? "导出合并 PNG" : "导出全部 PNG"}
@@ -1751,7 +1822,7 @@ export default function VideoFrameToolPage({ homeHref }) {
           预览使用缩略图减轻内存占用；实际下载时会重新按原视频分辨率抓取 PNG。
           {resultPreviewUsesTransparency ? " 透明模式下，导出会按同一组去底与精修参数重新处理整帧。" : ""}
           {mergeAllIntoSheet
-            ? ` 勾选合并导出时，会按时间顺序拼成一张大图；如果总尺寸超过浏览器可承受范围，会自动缩小到不超过 ${MAX_FRAME_SHEET_SIDE}px 边长和 ${MAX_FRAME_SHEET_PIXELS.toLocaleString()} 像素。`
+            ? ` 勾选合并导出时，会按你指定的行列拼成一张大图；如果总尺寸超过浏览器可承受范围，会自动缩小到不超过 ${MAX_FRAME_SHEET_SIDE}px 边长和 ${MAX_FRAME_SHEET_PIXELS.toLocaleString()} 像素。`
             : ""}
         </div>
       </div>
