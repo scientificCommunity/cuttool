@@ -315,6 +315,52 @@ function waitForNextPaint() {
   });
 }
 
+function waitForPresentedFrame(video, targetTime, timeoutMs = 1500) {
+  if (typeof video?.requestVideoFrameCallback !== "function") {
+    return waitForNextPaint();
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let callbackId = null;
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      if (callbackId != null && typeof video.cancelVideoFrameCallback === "function") {
+        video.cancelVideoFrameCallback(callbackId);
+      }
+      window.clearTimeout(timeoutId);
+      resolve();
+    };
+
+    const timeoutId = window.setTimeout(finish, timeoutMs);
+
+    const onFrame = (_now, metadata) => {
+      if (settled) {
+        return;
+      }
+
+      if (!metadata || !Number.isFinite(metadata.mediaTime) || Math.abs(metadata.mediaTime - targetTime) <= 0.06) {
+        finish();
+        return;
+      }
+
+      if (metadata.mediaTime >= targetTime - 0.03) {
+        finish();
+        return;
+      }
+
+      callbackId = video.requestVideoFrameCallback(onFrame);
+    };
+
+    callbackId = video.requestVideoFrameCallback(onFrame);
+  });
+}
+
 function seekVideo(video, time) {
   return new Promise((resolve, reject) => {
     const safeTime = Math.max(0, Math.min(time, Number.isFinite(video.duration) ? video.duration : time));
@@ -337,7 +383,7 @@ function seekVideo(video, time) {
 
       settled = true;
       cleanup();
-      waitForNextPaint().then(resolve);
+      waitForPresentedFrame(video, safeTime).then(resolve);
     };
 
     const onError = () => {
@@ -685,6 +731,7 @@ async function renderProcessedFrameBlob({
 
 export default function VideoFrameToolPage({ homeHref }) {
   const videoRef = useRef(null);
+  const extractorVideoRef = useRef(null);
   const captureCanvasRef = useRef(null);
   const outputCanvasRef = useRef(null);
   const scratchCanvasRef = useRef(null);
@@ -976,6 +1023,13 @@ export default function VideoFrameToolPage({ homeHref }) {
       video.load();
     }
 
+    const extractorVideo = extractorVideoRef.current;
+    if (extractorVideo) {
+      extractorVideo.pause();
+      extractorVideo.removeAttribute("src");
+      extractorVideo.load();
+    }
+
     if (videoUrlRef.current) {
       URL.revokeObjectURL(videoUrlRef.current);
       videoUrlRef.current = "";
@@ -1000,8 +1054,8 @@ export default function VideoFrameToolPage({ homeHref }) {
       return;
     }
 
-    const video = videoRef.current;
-    if (!video) {
+    const previewVideo = videoRef.current;
+    if (!previewVideo) {
       return;
     }
 
@@ -1015,19 +1069,39 @@ export default function VideoFrameToolPage({ homeHref }) {
       clearLoadedState();
       const objectUrl = URL.createObjectURL(file);
       videoUrlRef.current = objectUrl;
-      video.src = objectUrl;
-      video.preload = "auto";
-      video.load();
-      await waitForVideoLoaded(video);
+      previewVideo.src = objectUrl;
+      previewVideo.preload = "auto";
+      previewVideo.load();
+
+      if (!extractorVideoRef.current && typeof document !== "undefined") {
+        const extractor = document.createElement("video");
+        extractor.preload = "auto";
+        extractor.muted = true;
+        extractor.playsInline = true;
+        extractor.crossOrigin = "anonymous";
+        extractorVideoRef.current = extractor;
+      }
+
+      const extractorVideo = extractorVideoRef.current;
+      if (!extractorVideo) {
+        throw new Error("抽帧器初始化失败");
+      }
+
+      extractorVideo.pause();
+      extractorVideo.src = objectUrl;
+      extractorVideo.preload = "auto";
+      extractorVideo.load();
+
+      await Promise.all([waitForVideoLoaded(previewVideo), waitForVideoLoaded(extractorVideo)]);
 
       setVideoMeta({
         name: file.name,
-        width: video.videoWidth,
-        height: video.videoHeight,
-        duration: Number.isFinite(video.duration) ? video.duration : 0,
+        width: previewVideo.videoWidth,
+        height: previewVideo.videoHeight,
+        duration: Number.isFinite(previewVideo.duration) ? previewVideo.duration : 0,
       });
       setStartTime(0);
-      setEndTime(Number.isFinite(video.duration) ? video.duration : 0);
+      setEndTime(Number.isFinite(previewVideo.duration) ? previewVideo.duration : 0);
       setStatus("视频已载入。设置抽帧方式和时间范围后，点击“开始抽帧”。");
     } catch (error) {
       console.error(error);
@@ -1134,11 +1208,12 @@ export default function VideoFrameToolPage({ homeHref }) {
   };
 
   const captureFrameImageDataAtTime = async (time, { maxSide = null, crop = null } = {}) => {
-    const video = videoRef.current;
+    const video = extractorVideoRef.current;
     if (!video) {
-      throw new Error("视频尚未初始化");
+      throw new Error("抽帧器尚未初始化");
     }
 
+    video.pause();
     await seekVideo(video, time);
     return drawFrameToCanvas(video, ensureCaptureCanvas(), maxSide, crop);
   };
