@@ -267,6 +267,25 @@ const styles = {
     fontWeight: 700,
     cursor: "pointer",
   },
+  playbackModeRow: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+  },
+  playbackModeButtonActive: {
+    background: "#f8fafc",
+    color: "#0f172a",
+    borderColor: "#f8fafc",
+  },
+  playbackCanvas: {
+    display: "block",
+    maxWidth: "100%",
+    maxHeight: "280px",
+    width: "auto",
+    height: "auto",
+    borderRadius: "12px",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
+  },
 };
 
 function waitForVideoLoaded(video) {
@@ -689,6 +708,27 @@ async function renderProcessedFrameBlob({
   outputCanvas,
   scratchCanvas,
 }) {
+  const rendered = renderProcessedFrameToCanvas({
+    sourceImageData,
+    processConfig,
+    outputCanvas,
+    scratchCanvas,
+  });
+
+  return {
+    blob: await canvasToBlob(outputCanvas),
+    width: rendered.width,
+    height: rendered.height,
+    scratchCanvas: rendered.scratchCanvas,
+  };
+}
+
+function renderProcessedFrameToCanvas({
+  sourceImageData,
+  processConfig,
+  outputCanvas,
+  scratchCanvas,
+}) {
   if (!outputCanvas) {
     throw new Error("输出画布未初始化");
   }
@@ -705,7 +745,6 @@ async function renderProcessedFrameBlob({
     ctx.putImageData(sourceImageData, 0, 0);
 
     return {
-      blob: await canvasToBlob(outputCanvas),
       width: sourceImageData.width,
       height: sourceImageData.height,
       scratchCanvas,
@@ -722,7 +761,6 @@ async function renderProcessedFrameBlob({
   });
 
   return {
-    blob: await canvasToBlob(outputCanvas),
     width: sourceImageData.width,
     height: sourceImageData.height,
     scratchCanvas: nextScratch || scratchCanvas,
@@ -731,12 +769,14 @@ async function renderProcessedFrameBlob({
 
 export default function VideoFrameToolPage({ homeHref }) {
   const videoRef = useRef(null);
-  const extractorVideoRef = useRef(null);
   const captureCanvasRef = useRef(null);
   const outputCanvasRef = useRef(null);
   const scratchCanvasRef = useRef(null);
   const sheetCanvasRef = useRef(null);
   const playbackTimerRef = useRef(null);
+  const playbackCanvasRef = useRef(null);
+  const playbackScratchCanvasRef = useRef(null);
+  const playbackRenderTokenRef = useRef(0);
   const previewFramesRef = useRef([]);
   const videoUrlRef = useRef("");
   const cropDraftRef = useRef(null);
@@ -762,6 +802,10 @@ export default function VideoFrameToolPage({ homeHref }) {
   const [mergeAllIntoSheet, setMergeAllIntoSheet] = useState(false);
   const [sheetRows, setSheetRows] = useState(1);
   const [sheetColumns, setSheetColumns] = useState(1);
+  const [playbackPreviewMode, setPlaybackPreviewMode] = useState("full");
+  const [playbackPreviewLoading, setPlaybackPreviewLoading] = useState(false);
+  const [playbackPreviewError, setPlaybackPreviewError] = useState("");
+  const [playbackPreviewSize, setPlaybackPreviewSize] = useState(null);
   const [previewFrameIndex, setPreviewFrameIndex] = useState(0);
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [frames, setFrames] = useState([]);
@@ -930,12 +974,16 @@ export default function VideoFrameToolPage({ homeHref }) {
       return "抽帧完成后，这里会把结果连起来播放预览。";
     }
 
+    const sizeText = playbackPreviewSize
+      ? ` 当前预览分辨率 ${playbackPreviewSize.width} × ${playbackPreviewSize.height}。`
+      : "";
+
     if (frames.length === 1 || !playbackPlan) {
-      return "当前只有 1 张预览帧，可以手动查看，但没有连续播放效果。";
+      return `当前只有 1 张预览帧，可以手动查看，但没有连续播放效果。${sizeText}`;
     }
 
-    return `预览会按抽帧时间间隔循环播放，当前约 ${playbackPlan.effectiveFps} fps。`;
-  }, [frames.length, playbackPlan]);
+    return `预览会按抽帧时间间隔循环播放，当前约 ${playbackPlan.effectiveFps} fps。${sizeText}`;
+  }, [frames.length, playbackPlan, playbackPreviewSize]);
 
   useEffect(() => {
     previewFramesRef.current = frames;
@@ -957,6 +1005,11 @@ export default function VideoFrameToolPage({ homeHref }) {
     playbackTimerRef.current = null;
     setPreviewFrameIndex(0);
     setPreviewPlaying(false);
+    setPlaybackPreviewLoading(false);
+    setPlaybackPreviewError("");
+    setPlaybackPreviewSize(null);
+    playbackScratchCanvasRef.current = null;
+    playbackRenderTokenRef.current += 1;
   }, [frames]);
 
   useEffect(() => () => {
@@ -986,6 +1039,94 @@ export default function VideoFrameToolPage({ homeHref }) {
       cancelled = true;
     };
   }, [videoMeta]);
+
+  useEffect(() => {
+    const frame = activePreviewFrame;
+    const canvas = playbackCanvasRef.current;
+    const renderToken = playbackRenderTokenRef.current + 1;
+    playbackRenderTokenRef.current = renderToken;
+
+    if (!frame) {
+      setPlaybackPreviewLoading(false);
+      setPlaybackPreviewError("");
+      setPlaybackPreviewSize(null);
+      if (canvas) {
+        const ctx = canvas.getContext("2d");
+        ctx?.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      return undefined;
+    }
+
+    if (playbackPreviewMode !== "full") {
+      setPlaybackPreviewLoading(false);
+      setPlaybackPreviewError("");
+      setPlaybackPreviewSize({
+        width: frame.previewWidth,
+        height: frame.previewHeight,
+      });
+      return undefined;
+    }
+
+    const playbackVideo = videoRef.current;
+    if (!playbackVideo || !canvas) {
+      setPlaybackPreviewLoading(false);
+      setPlaybackPreviewError("原视频尚未初始化");
+      return undefined;
+    }
+
+    setPlaybackPreviewLoading(true);
+    setPlaybackPreviewError("");
+
+    Promise.resolve()
+      .then(async () => {
+        playbackVideo.pause();
+        await seekVideo(playbackVideo, frame.time);
+        const { imageData } = drawFrameToCanvas(
+          playbackVideo,
+          ensureCaptureCanvas(),
+          null,
+          frame.cropRect || null,
+        );
+
+        if (playbackRenderTokenRef.current !== renderToken) {
+          return;
+        }
+
+        const rendered = renderProcessedFrameToCanvas({
+          sourceImageData: imageData,
+          processConfig: frame.processConfig || currentProcessConfig,
+          outputCanvas: canvas,
+          scratchCanvas: playbackScratchCanvasRef.current,
+        });
+
+        playbackScratchCanvasRef.current = rendered.scratchCanvas || playbackScratchCanvasRef.current;
+
+        if (playbackRenderTokenRef.current !== renderToken) {
+          return;
+        }
+
+        setPlaybackPreviewSize({
+          width: rendered.width,
+          height: rendered.height,
+        });
+        setPlaybackPreviewLoading(false);
+      })
+      .catch((error) => {
+        if (playbackRenderTokenRef.current !== renderToken) {
+          return;
+        }
+
+        console.error(error);
+        setPlaybackPreviewLoading(false);
+        setPlaybackPreviewError(error instanceof Error ? error.message : "原分辨率预览生成失败");
+      });
+
+    return () => {
+      if (playbackRenderTokenRef.current === renderToken) {
+        playbackRenderTokenRef.current += 1;
+      }
+    };
+  }, [activePreviewFrame, currentProcessConfig, playbackPreviewMode]);
 
   useEffect(() => {
     window.clearTimeout(playbackTimerRef.current);
@@ -1021,13 +1162,6 @@ export default function VideoFrameToolPage({ homeHref }) {
       video.pause();
       video.removeAttribute("src");
       video.load();
-    }
-
-    const extractorVideo = extractorVideoRef.current;
-    if (extractorVideo) {
-      extractorVideo.pause();
-      extractorVideo.removeAttribute("src");
-      extractorVideo.load();
     }
 
     if (videoUrlRef.current) {
@@ -1072,27 +1206,7 @@ export default function VideoFrameToolPage({ homeHref }) {
       previewVideo.src = objectUrl;
       previewVideo.preload = "auto";
       previewVideo.load();
-
-      if (!extractorVideoRef.current && typeof document !== "undefined") {
-        const extractor = document.createElement("video");
-        extractor.preload = "auto";
-        extractor.muted = true;
-        extractor.playsInline = true;
-        extractor.crossOrigin = "anonymous";
-        extractorVideoRef.current = extractor;
-      }
-
-      const extractorVideo = extractorVideoRef.current;
-      if (!extractorVideo) {
-        throw new Error("抽帧器初始化失败");
-      }
-
-      extractorVideo.pause();
-      extractorVideo.src = objectUrl;
-      extractorVideo.preload = "auto";
-      extractorVideo.load();
-
-      await Promise.all([waitForVideoLoaded(previewVideo), waitForVideoLoaded(extractorVideo)]);
+      await waitForVideoLoaded(previewVideo);
 
       setVideoMeta({
         name: file.name,
@@ -1208,9 +1322,9 @@ export default function VideoFrameToolPage({ homeHref }) {
   };
 
   const captureFrameImageDataAtTime = async (time, { maxSide = null, crop = null } = {}) => {
-    const video = extractorVideoRef.current;
+    const video = videoRef.current;
     if (!video) {
-      throw new Error("抽帧器尚未初始化");
+      throw new Error("原视频尚未初始化");
     }
 
     video.pause();
@@ -1809,6 +1923,30 @@ export default function VideoFrameToolPage({ homeHref }) {
               </div>
             </div>
             <div style={styles.playbackButtonRow}>
+              <div style={styles.playbackModeRow}>
+                <button
+                  onClick={() => setPlaybackPreviewMode("full")}
+                  disabled={!frames.length}
+                  style={{
+                    ...styles.playbackButton,
+                    ...(playbackPreviewMode === "full" ? styles.playbackModeButtonActive : null),
+                    ...(!frames.length ? styles.buttonDisabled : null),
+                  }}
+                >
+                  原分辨率预览
+                </button>
+                <button
+                  onClick={() => setPlaybackPreviewMode("thumbnail")}
+                  disabled={!frames.length}
+                  style={{
+                    ...styles.playbackButton,
+                    ...(playbackPreviewMode === "thumbnail" ? styles.playbackModeButtonActive : null),
+                    ...(!frames.length ? styles.buttonDisabled : null),
+                  }}
+                >
+                  缩略预览
+                </button>
+              </div>
               <button
                 onClick={togglePreviewPlayback}
                 disabled={frames.length <= 1 || controlsDisabled}
@@ -1837,7 +1975,9 @@ export default function VideoFrameToolPage({ homeHref }) {
               ...(activePreviewFrame?.processConfig?.outputMode === "transparent" ? checkerboard : null),
             }}
           >
-            {activePreviewFrame ? (
+            {activePreviewFrame && playbackPreviewMode === "full" ? (
+              <canvas ref={playbackCanvasRef} style={styles.playbackCanvas} />
+            ) : activePreviewFrame ? (
               <img
                 src={activePreviewFrame.previewUrl}
                 alt={`preview-frame-${activePreviewFrame.index}`}
@@ -1849,6 +1989,12 @@ export default function VideoFrameToolPage({ homeHref }) {
               </div>
             )}
           </div>
+          {playbackPreviewMode === "full" && playbackPreviewLoading ? (
+            <div style={styles.mutedTip}>正在生成原分辨率预览...</div>
+          ) : null}
+          {playbackPreviewMode === "full" && playbackPreviewError ? (
+            <div style={styles.mutedTip}>原分辨率预览失败：{playbackPreviewError}</div>
+          ) : null}
           <div style={styles.mutedTip}>{playbackSummary}</div>
         </div>
         <div style={styles.frameScroller}>
