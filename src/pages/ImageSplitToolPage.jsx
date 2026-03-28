@@ -292,8 +292,10 @@ export default function ImageSplitToolPage({ homeHref }) {
   const [imgMeta, setImgMeta] = useState(null);
   const [rows, setRows] = useState(3);
   const [columns, setColumns] = useState(3);
+  const [exportRow, setExportRow] = useState(1);
   const [loading, setLoading] = useState(false);
   const [exportingAll, setExportingAll] = useState(false);
+  const [exportingRow, setExportingRow] = useState(false);
   const [status, setStatus] = useState("上传一张图片后，设置行数和列数，就能把整张图切成多张 PNG。");
   const [testResults] = useState(() => runImageSplitTests());
 
@@ -332,6 +334,23 @@ export default function ImageSplitToolPage({ homeHref }) {
   }, [splitResult]);
 
   const hiddenPreviewCount = splitResult ? splitResult.pieces.length - visiblePieces.length : 0;
+  const selectedRowPieces = useMemo(() => {
+    if (!splitResult) {
+      return [];
+    }
+
+    return splitResult.pieces.filter((piece) => piece.row === exportRow);
+  }, [exportRow, splitResult]);
+
+  const exportRowSummary = useMemo(() => {
+    if (!splitResult) {
+      return "图片切分完成后，可以按指定行批量导出这一行的所有图片。";
+    }
+
+    const rowCount = splitResult.rows;
+    const rowLabel = Math.min(exportRow, rowCount);
+    return `当前选择第 ${rowLabel} 行，共 ${selectedRowPieces.length} 张；会按列顺序逐张导出这一行的 PNG。`;
+  }, [exportRow, selectedRowPieces.length, splitResult]);
 
   useEffect(() => {
     if (!imgMeta || !splitResult) {
@@ -375,11 +394,20 @@ export default function ImageSplitToolPage({ homeHref }) {
     );
   }, [columns, imgMeta, rows, splitResult]);
 
+  useEffect(() => {
+    if (!splitResult) {
+      setExportRow(1);
+      return;
+    }
+
+    setExportRow((current) => Math.min(current, splitResult.rows));
+  }, [splitResult]);
+
   useEffect(() => () => {
     decodedRef.current?.close?.();
   }, []);
 
-  const controlsDisabled = loading || exportingAll;
+  const controlsDisabled = loading || exportingAll || exportingRow;
   const hasImage = Boolean(imgMeta && splitResult);
 
   const clearLoadedState = () => {
@@ -460,6 +488,31 @@ export default function ImageSplitToolPage({ homeHref }) {
     }
   };
 
+  const exportRowPieces = async () => {
+    const source = decodedRef.current?.source;
+    if (!source || !imgMeta || !splitResult || !selectedRowPieces.length) {
+      return;
+    }
+
+    setExportingRow(true);
+    setStatus(`准备导出第 ${exportRow} 行的 ${selectedRowPieces.length} 张 PNG。浏览器可能会请求批量下载权限。`);
+
+    try {
+      for (const piece of selectedRowPieces) {
+        const blob = await createPieceBlob(source, piece);
+        triggerBlobDownload(blob, createPieceDownloadName(imgMeta.name, piece));
+        await new Promise((resolve) => window.setTimeout(resolve, 80));
+      }
+
+      setStatus(`已触发第 ${exportRow} 行的 ${selectedRowPieces.length} 张 PNG 下载。`);
+    } catch (error) {
+      console.error(error);
+      setStatus(`按行导出失败：${error instanceof Error ? error.message : "请稍后重试"}`);
+    } finally {
+      setExportingRow(false);
+    }
+  };
+
   const applyPreset = (nextRows, nextColumns) => {
     setRows(normalizeSplitCount(nextRows));
     setColumns(normalizeSplitCount(nextColumns));
@@ -471,6 +524,10 @@ export default function ImageSplitToolPage({ homeHref }) {
 
   const handleColumnChange = (event) => {
     setColumns(normalizeSplitCount(event.target.value));
+  };
+
+  const handleExportRowChange = (event) => {
+    setExportRow(normalizeSplitCount(event.target.value));
   };
 
   return (
@@ -553,6 +610,23 @@ export default function ImageSplitToolPage({ homeHref }) {
             </div>
           </div>
 
+          <div style={styles.numberCard}>
+            <div style={styles.rowBetween}>
+              <span style={styles.labelInline}>导出某一行</span>
+              <span style={styles.value}>第 {splitResult ? Math.min(exportRow, splitResult.rows) : exportRow} 行</span>
+            </div>
+            <input
+              type="number"
+              min="1"
+              max={splitResult?.rows ?? MAX_SPLIT_COUNT}
+              value={splitResult ? Math.min(exportRow, splitResult.rows) : exportRow}
+              onChange={handleExportRowChange}
+              disabled={!hasImage || controlsDisabled}
+              style={styles.numberInput}
+            />
+            <div style={styles.mutedTip}>{exportRowSummary}</div>
+          </div>
+
           <div style={styles.buttonGrid}>
             <button
               onClick={exportAllPieces}
@@ -564,6 +638,18 @@ export default function ImageSplitToolPage({ homeHref }) {
             >
               {exportingAll ? "导出中..." : "导出全部 PNG"}
             </button>
+            <button
+              onClick={exportRowPieces}
+              disabled={!hasImage || !selectedRowPieces.length || controlsDisabled}
+              style={{
+                ...styles.infoButton,
+                ...(hasImage && selectedRowPieces.length && !controlsDisabled ? null : styles.buttonDisabled),
+              }}
+            >
+              {exportingRow ? "导出中..." : `导出第 ${splitResult ? Math.min(exportRow, splitResult.rows) : exportRow} 行`}
+            </button>
+          </div>
+          <div style={styles.buttonGrid}>
             <button
               onClick={() => applyPreset(3, 3)}
               disabled={controlsDisabled}
